@@ -322,9 +322,9 @@ class Stadwag_Api {
                 $caption_0  = get_the_title( $thumb_id );
                 $credit_0   = get_post_meta( $thumb_id, '_wp_attachment_image_alt', true );
 
-                // credit[0] is verplicht — fallback naar bijschrift of auteursnaam
+                // credit[0] is verplicht — fallback naar bijschrift of standaard credit
                 if ( empty( $credit_0 ) ) {
-                    $credit_0 = $caption_0 ?: get_the_author_meta( 'display_name', $post->post_author );
+                    $credit_0 = $caption_0 ?: 'Uit in Wageningen';
                 }
             }
         }
