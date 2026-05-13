@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Stadwageningen Doorplaatsen
+ * Plugin Name: Stad Wageningen Doorplaatser
  * Plugin URI:  https://www.stadwageningen.nl/tip-de-redactie
  * Description: Plaatst een WordPress bericht door naar stadwageningen.nl via de knop "Tip de redactie".
  * Version:     1.0.0

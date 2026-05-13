@@ -114,7 +114,7 @@ class Stadwag_Admin {
         foreach ( [ 'post', 'page' ] as $screen ) {
             add_meta_box(
                 'stadwag-doorplaatsen',
-                'Doorplaatsen naar Stad Wageningen',
+                'Stad Wageningen',
                 [ $this, 'render_meta_box' ],
                 $screen,
                 'side',
