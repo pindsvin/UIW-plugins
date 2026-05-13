@@ -8,7 +8,8 @@ class Stadwag_Admin {
         add_action( 'admin_init',            [ $this, 'register_settings' ] );
         add_action( 'add_meta_boxes',        [ $this, 'register_meta_box' ] );
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_metabox_assets' ] );
-        add_action( 'wp_ajax_stadwag_doorplaatsen', [ $this, 'handle_ajax' ] );
+        add_action( 'wp_ajax_stadwag_doorplaatsen',        [ $this, 'handle_ajax' ] );
+        add_action( 'wp_ajax_stadwag_preview',             [ $this, 'handle_preview_ajax' ] );
     }
 
     // -------------------------------------------------------------------------
@@ -166,13 +167,24 @@ class Stadwag_Admin {
             echo '<p style="color:#999;font-size:12px;">Geen uitgelichte afbeelding ingesteld.</p>';
         }
 
-        // Actieknop
+        // Stap 1: voorvertoning ophalen
         echo '<p>';
-        echo '<button type="button" id="stadwag-submit-btn" class="button button-primary" style="width:100%;">';
-        echo 'Doorplaatsen naar Stad Wageningen';
+        echo '<button type="button" id="stadwag-preview-btn" class="button button-primary" style="width:100%;">';
+        echo 'Controleer &amp; doorplaatsen';
         echo '</button>';
         echo '<span id="stadwag-spinner" class="spinner" style="float:none;margin:4px 0 0 5px;visibility:hidden;"></span>';
         echo '</p>';
+
+        // Stap 2: voorvertoning + bevestigingsknoppen (verborgen tot stap 1)
+        echo '<div id="stadwag-preview" style="display:none;border:1px solid #ccd0d4;border-radius:3px;padding:10px;margin-top:8px;background:#f8f8f8;">';
+        echo '<p style="margin:0 0 8px;font-weight:600;font-size:12px;text-transform:uppercase;color:#666;">Voorvertoning</p>';
+        echo '<div id="stadwag-preview-content"></div>';
+        echo '<p style="margin:12px 0 4px;">';
+        echo '<button type="button" id="stadwag-confirm-btn" class="button button-primary">Indienen bij Stad Wageningen</button> ';
+        echo '<button type="button" id="stadwag-cancel-btn" class="button">Annuleren</button>';
+        echo '</p>';
+        echo '</div>';
+
         echo '<div id="stadwag-feedback" style="margin-top:8px;"></div>';
 
         echo '<input type="hidden" id="stadwag_post_id" value="' . esc_attr( $post->ID ) . '">';
@@ -196,7 +208,8 @@ class Stadwag_Admin {
         wp_localize_script( 'stadwag-metabox', 'stadwagAjax', [
             'ajaxUrl' => admin_url( 'admin-ajax.php' ),
             'i18n'    => [
-                'sending' => 'Bezig met doorplaatsen…',
+                'loading' => 'Voorvertoning ophalen…',
+                'sending' => 'Bezig met indienen…',
                 'success' => 'Bericht succesvol doorgeplaatst!',
                 'error'   => 'Fout: ',
             ],
@@ -247,5 +260,64 @@ class Stadwag_Admin {
             'message'      => 'Bericht succesvol doorgeplaatst!',
             'forwarded_at' => $now,
         ] );
+    }
+
+    // -------------------------------------------------------------------------
+    // Preview AJAX handler
+    // -------------------------------------------------------------------------
+
+    public function handle_preview_ajax(): void {
+        $post_id = (int) ( $_POST['post_id'] ?? 0 );
+
+        if ( ! $post_id || ! check_ajax_referer( 'stadwag_doorplaatsen_' . $post_id, 'nonce', false ) ) {
+            wp_send_json_error( [ 'message' => 'Ongeldige beveiligingstoken.' ], 403 );
+        }
+        if ( ! current_user_can( 'edit_post', $post_id ) ) {
+            wp_send_json_error( [ 'message' => 'Onvoldoende rechten.' ], 403 );
+        }
+
+        $post = get_post( $post_id );
+
+        $category_id = (int) ( $_POST['category_id'] ?? 4651 );
+        if ( ! in_array( $category_id, [ 4651, 4562, 4608 ], true ) ) {
+            $category_id = 4651;
+        }
+        $categories  = [ 4651 => 'Lokaal', 4562 => 'Sport', 4608 => 'Zakelijk' ];
+        $remarks     = sanitize_textarea_field( $_POST['remarks'] ?? '' );
+
+        $title   = mb_substr( wp_strip_all_tags( $post->post_title ), 0, 640 );
+        $content = wp_strip_all_tags( apply_filters( 'the_content', $post->post_content ) );
+        $excerpt = mb_substr( $content, 0, 300 ) . ( mb_strlen( $content ) > 300 ? '…' : '' );
+
+        // Afbeelding
+        $thumb_id   = get_post_thumbnail_id( $post_id );
+        $thumb_html = '';
+        if ( $thumb_id ) {
+            $thumb_src  = wp_get_attachment_image_url( $thumb_id, 'thumbnail' );
+            $thumb_name = basename( get_attached_file( $thumb_id ) );
+            if ( $thumb_src ) {
+                $thumb_html = '<img src="' . esc_url( $thumb_src ) . '" style="max-width:100%;height:auto;margin:6px 0;" alt="">';
+                $thumb_html .= '<br><small>' . esc_html( $thumb_name ) . '</small>';
+            }
+        } else {
+            $thumb_html = '<em style="color:#999;">Geen uitgelichte afbeelding</em>';
+        }
+
+        $html  = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+        $html .= '<tr><td style="padding:4px 0;color:#666;width:70px;vertical-align:top;">Koptekst</td>'
+               . '<td style="padding:4px 0;font-weight:600;">' . esc_html( $title ) . '</td></tr>';
+        $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Categorie</td>'
+               . '<td style="padding:4px 0;">' . esc_html( $categories[ $category_id ] ) . '</td></tr>';
+        $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Tekst</td>'
+               . '<td style="padding:4px 0;">' . esc_html( $excerpt ) . '</td></tr>';
+        if ( $remarks ) {
+            $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Opmerking</td>'
+                   . '<td style="padding:4px 0;">' . esc_html( $remarks ) . '</td></tr>';
+        }
+        $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Afbeelding</td>'
+               . '<td style="padding:4px 0;">' . $thumb_html . '</td></tr>';
+        $html .= '</table>';
+
+        wp_send_json_success( [ 'html' => $html ] );
     }
 }
