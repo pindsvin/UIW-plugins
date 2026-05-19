@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Cultuur in Wageningen Doorplaatser
  * Description: Plaatst een WordPress bericht door naar cultuurinwageningen.nl/agenda-nieuws-plaatsen/
- * Version:     1.0.0
+ * Version:     1.2.0
  * Author:      pindsvin
  * Text Domain: cultuur-wageningen
  */
@@ -141,8 +141,12 @@ class Cultuur_Wageningen_Plugin {
             wp_send_json_error(['message' => 'Kon het Cultuur Wageningen formulier niet bereiken. Probeer het opnieuw.']);
         }
 
-        $image = $this->get_featured_image($post_id);
+        $image  = $this->get_featured_image($post_id);
         $result = $this->submit_form($post, $user, $quiz_hash, $cookies, $image);
+
+        if (!empty($image['tmp']) && file_exists($image['path'])) {
+            @unlink($image['path']);
+        }
 
         if ($result['success']) {
             update_post_meta($post_id, self::META_KEY, time());
@@ -179,9 +183,10 @@ class Cultuur_Wageningen_Plugin {
     }
 
     /**
-     * Return info about the post's featured image, or null if none / too large.
+     * Return info about the post's featured image.
+     * If the file exceeds 1 MB, it is resized to fit within that limit.
      *
-     * @return array|null ['path'=>string, 'name'=>string, 'mime'=>string]
+     * @return array|null ['path'=>string, 'name'=>string, 'mime'=>string, 'tmp'=>bool]
      */
     private function get_featured_image($post_id) {
         $thumb_id = get_post_thumbnail_id($post_id);
@@ -200,16 +205,49 @@ class Cultuur_Wageningen_Plugin {
             return null;
         }
 
-        // CF7 form states max 1 MB
-        if (filesize($file) > 1 * 1024 * 1024) {
+        $max_bytes = 1 * 1024 * 1024;
+
+        if (filesize($file) <= $max_bytes) {
+            return ['path' => $file, 'name' => basename($file), 'mime' => $mime, 'tmp' => false];
+        }
+
+        // Resize until under 1 MB, halving the width each attempt.
+        $editor = wp_get_image_editor($file);
+        if (is_wp_error($editor)) {
             return null;
         }
 
-        return [
-            'path' => $file,
-            'name' => basename($file),
-            'mime' => $mime,
-        ];
+        $size  = $editor->get_size();
+        $width = (int) $size['width'];
+
+        $tmp_path = null;
+        for ($i = 0; $i < 5; $i++) {
+            $width = (int) ($width * 0.75);
+            $editor->resize($width, null, false);
+
+            $tmp_path = tempnam(sys_get_temp_dir(), 'ciw_') . '.' . pathinfo($file, PATHINFO_EXTENSION);
+            $saved    = $editor->save($tmp_path);
+
+            if (is_wp_error($saved)) {
+                return null;
+            }
+
+            if (filesize($tmp_path) <= $max_bytes) {
+                return ['path' => $tmp_path, 'name' => basename($file), 'mime' => $mime, 'tmp' => true];
+            }
+
+            // Still too large — try again from the resized version.
+            $editor = wp_get_image_editor($tmp_path);
+            if (is_wp_error($editor)) {
+                return null;
+            }
+        }
+
+        // Could not get under 1 MB after 5 attempts.
+        if ($tmp_path && file_exists($tmp_path)) {
+            @unlink($tmp_path);
+        }
+        return null;
     }
 
     /**
