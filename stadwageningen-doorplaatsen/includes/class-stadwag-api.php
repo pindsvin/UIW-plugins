@@ -87,14 +87,30 @@ class Stadwag_Api {
     }
 
     /**
+     * Test of de gegeven inloggegevens werken (zonder opslag).
+     * Bedoeld voor de verbindingstest op de instellingenpagina.
+     *
+     * @return true|WP_Error
+     */
+    public function test_credentials( string $email, string $password ): true|\WP_Error {
+        $result = $this->do_login( $email, $password );
+        return is_wp_error( $result ) ? $result : true;
+    }
+
+    /**
      * Logt in op Stad Wageningen en slaat sessie-cookie op als transient.
+     * Optioneel: meegegeven $email/$password gebruiken i.p.v. opgeslagen credentials.
      *
      * @return string|WP_Error  Cookie-string bij succes
      */
-    private function do_login(): string|\WP_Error {
-        $creds = $this->get_credentials();
-        if ( is_wp_error( $creds ) ) {
-            return $creds;
+    private function do_login( string $email = '', string $password = '' ): string|\WP_Error {
+        if ( $email === '' || $password === '' ) {
+            $creds = $this->get_credentials();
+            if ( is_wp_error( $creds ) ) {
+                return $creds;
+            }
+            $email    = $creds['email'];
+            $password = $creds['password'];
         }
 
         $login_url = STADWAG_TARGET_BASE . STADWAG_LOGIN_PATH;
@@ -141,8 +157,8 @@ class Stadwag_Api {
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => http_build_query( [
                 '__RequestVerificationToken' => $aft,
-                'Email'                      => $creds['email'],
-                'Password'                   => $creds['password'],
+                'Email'                      => $email,
+                'Password'                   => $password,
                 'RememberMe'                 => 'false',
             ] ),
             CURLOPT_RETURNTRANSFER => true,

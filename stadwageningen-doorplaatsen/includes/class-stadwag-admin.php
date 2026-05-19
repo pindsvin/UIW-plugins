@@ -103,11 +103,10 @@ class Stadwag_Admin {
             $out['pass_enc'] = $current['pass_enc'] ?? '';
         }
 
-        // Verbindingstest: probeer in te loggen met de opgeslagen gegevens
-        if ( ! empty( $out['email'] ) && ! empty( $out['pass_enc'] ) ) {
-            // Sla tijdelijk op zodat get_credentials() het kan lezen
-            update_option( 'stadwag_settings', $out );
-            $result = $api->get_valid_session();
+        // Verbindingstest: alleen als er een nieuw wachtwoord ingevoerd is
+        // (plaintext is dan nog beschikbaar — na encryptie niet meer)
+        if ( ! empty( $out['email'] ) && $new_pass !== '' ) {
+            $result = $api->test_credentials( $out['email'], $new_pass );
 
             if ( is_wp_error( $result ) ) {
                 add_settings_error(
