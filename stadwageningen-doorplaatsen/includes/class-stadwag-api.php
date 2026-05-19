@@ -333,26 +333,30 @@ class Stadwag_Api {
             return new \WP_Error( 'stadwag_token_missing', '__RequestVerificationToken niet gevonden op formulierpagina.' );
         }
 
-        // Extraheer ALLE hidden input-velden uit het formulier
-        // (pikt automatisch RequestName_Aes, antiforgery-tokens en eventuele
-        //  toekomstige hidden fields mee — ongeacht naamswijzigingen)
+        // Extraheer server-gegenereerde input-velden uit het formulier:
+        // - type="hidden" altijd (ook als value leeg is)
+        // - andere types (text, etc.) alleen als ze een vooraf ingevulde value hebben
+        //   (zo pikt dit ook RequestName_Aes mee, die type="text" is maar wél een token bevat)
+        // - submit/button/reset/checkbox/radio/file nooit
         $hidden_fields = [];
+        $skip_types    = [ 'submit', 'button', 'reset', 'checkbox', 'radio', 'file', 'image' ];
         if ( preg_match_all( '/<input\b[^>]+>/i', $body, $input_matches ) ) {
             foreach ( $input_matches[0] as $tag ) {
-                if ( ! preg_match( '/\btype=["\']hidden["\']/i', $tag ) ) {
-                    continue;
-                }
+                $type  = 'text';
                 $name  = '';
                 $value = '';
-                if ( preg_match( '/\bname=["\']([^"\']+)["\']/i', $tag, $m ) ) {
-                    $name = $m[1];
+                if ( preg_match( '/\btype=["\']([^"\']+)["\']/i',  $tag, $m ) ) { $type  = strtolower( $m[1] ); }
+                if ( preg_match( '/\bname=["\']([^"\']+)["\']/i',  $tag, $m ) ) { $name  = $m[1]; }
+                if ( preg_match( '/\bvalue=["\']([^"\']*)["\']/i', $tag, $m ) ) { $value = html_entity_decode( $m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8' ); }
+
+                if ( $name === '' || in_array( $type, $skip_types, true ) ) {
+                    continue;
                 }
-                if ( preg_match( '/\bvalue=["\']([^"\']*)["\']/i', $tag, $m ) ) {
-                    $value = html_entity_decode( $m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+                // Alleen meenemen als het hidden is, of als er een waarde in staat
+                if ( $type !== 'hidden' && $value === '' ) {
+                    continue;
                 }
-                if ( $name !== '' ) {
-                    $hidden_fields[ $name ] = $value;
-                }
+                $hidden_fields[ $name ] = $value;
             }
         }
 
