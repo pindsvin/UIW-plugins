@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Cultuur in Wageningen Doorplaatser
  * Description: Plaatst een WordPress bericht door naar cultuurinwageningen.nl/agenda-nieuws-plaatsen/
- * Version:     1.2.0
+ * Version:     1.3.0
  * Author:      pindsvin
  * Text Domain: cultuur-wageningen
  */
@@ -135,14 +135,14 @@ class Cultuur_Wageningen_Plugin {
 
         $user = wp_get_current_user();
 
-        [$quiz_hash, $cookies] = $this->fetch_quiz_hash();
+        [$quiz_hash, $cookies, $cf7_meta] = $this->fetch_quiz_hash();
 
         if (!$quiz_hash) {
             wp_send_json_error(['message' => 'Kon het Cultuur Wageningen formulier niet bereiken. Probeer het opnieuw.']);
         }
 
         $image  = $this->get_featured_image($post_id);
-        $result = $this->submit_form($post, $user, $quiz_hash, $cookies, $image);
+        $result = $this->submit_form($post, $user, $quiz_hash, $cookies, $image, $cf7_meta);
 
         if (!empty($image['tmp']) && file_exists($image['path'])) {
             @unlink($image['path']);
@@ -157,9 +157,11 @@ class Cultuur_Wageningen_Plugin {
     }
 
     /**
-     * GET the form page and extract the CF7 quiz answer hash + session cookies.
+     * GET the form page and extract all CF7 metadata + quiz hash + cookies.
+     * Haalt _wpcf7_version, _wpcf7_unit_tag en quiz-hash dynamisch op
+     * zodat we altijd synchroon blijven met de actuele formulierversie.
      *
-     * @return array [string|null $quiz_hash, array $cookies]
+     * @return array [string|null $quiz_hash, array $cookies, array $cf7_meta]
      */
     private function fetch_quiz_hash() {
         $response = wp_remote_get(self::FORM_URL, [
@@ -168,18 +170,34 @@ class Cultuur_Wageningen_Plugin {
         ]);
 
         if (is_wp_error($response)) {
-            return [null, []];
+            return [null, [], []];
         }
 
         $body = wp_remote_retrieve_body($response);
 
         if (!preg_match('/name="_wpcf7_quiz_answer_quiz-467"\s+value="([^"]+)"/', $body, $m)) {
-            return [null, []];
+            return [null, [], []];
         }
 
-        $cookies = wp_remote_retrieve_cookies($response);
+        $quiz_hash = $m[1];
+        $cookies   = wp_remote_retrieve_cookies($response);
 
-        return [$m[1], $cookies];
+        // Haal CF7-metadata op uit de wpcf7 shortcode / hidden fields
+        $cf7_meta = [];
+        if (preg_match('/name="_wpcf7_version"\s+value="([^"]+)"/', $body, $vm)) {
+            $cf7_meta['version'] = $vm[1];
+        }
+        if (preg_match('/name="_wpcf7_unit_tag"\s+value="([^"]+)"/', $body, $utm)) {
+            $cf7_meta['unit_tag'] = $utm[1];
+        }
+        if (preg_match('/name="_wpcf7_locale"\s+value="([^"]+)"/', $body, $lm)) {
+            $cf7_meta['locale'] = $lm[1];
+        }
+        if (preg_match('/name="_wpcf7_container_post"\s+value="([^"]+)"/', $body, $cpm)) {
+            $cf7_meta['container_post'] = $cpm[1];
+        }
+
+        return [$quiz_hash, $cookies, $cf7_meta];
     }
 
     /**
@@ -253,25 +271,27 @@ class Cultuur_Wageningen_Plugin {
     /**
      * Build a multipart/form-data POST body and send it to the CF7 REST API.
      */
-    private function submit_form($post, $user, $quiz_hash, $cookies, $image) {
+    private function submit_form($post, $user, $quiz_hash, $cookies, $image, array $cf7_meta = []) {
         $content = $this->html_to_plain($post->post_content);
 
         if (mb_strlen($content) < 50) {
             return ['success' => false, 'message' => 'De berichttekst is te kort (minimaal 50 tekens vereist).'];
         }
 
+        // Gebruik dynamisch opgehaalde CF7-metadata als die beschikbaar is,
+        // val terug op de hardcoded constanten.
         $fields = [
             '_wpcf7'                      => self::WPCF7_ID,
-            '_wpcf7_version'              => self::WPCF7_VERSION,
-            '_wpcf7_locale'               => self::WPCF7_LOCALE,
-            '_wpcf7_unit_tag'             => self::WPCF7_UNIT_TAG,
-            '_wpcf7_container_post'       => self::WPCF7_POST,
+            '_wpcf7_version'              => $cf7_meta['version']        ?? self::WPCF7_VERSION,
+            '_wpcf7_locale'               => $cf7_meta['locale']         ?? self::WPCF7_LOCALE,
+            '_wpcf7_unit_tag'             => $cf7_meta['unit_tag']       ?? self::WPCF7_UNIT_TAG,
+            '_wpcf7_container_post'       => $cf7_meta['container_post'] ?? self::WPCF7_POST,
             '_wpcf7_posted_data_hash'     => '',
             'naam'                        => $user->display_name,
             'email'                       => $user->user_email,
             'titel'                       => $post->post_title,
             'bericht'                     => $content,
-            'acceptance-335'              => '1',
+            'acceptance-335'              => 'on', // standaard browser checkbox-waarde
             'stoppert'                    => '',
             'quiz-467'                    => 'Gelderland',
             '_wpcf7_quiz_answer_quiz-467' => $quiz_hash,
@@ -306,12 +326,18 @@ class Cultuur_Wageningen_Plugin {
             return ['success' => true, 'message' => 'Bericht succesvol geplaatst op Cultuur in Wageningen!'];
         }
 
+        $status     = $data['status']  ?? '(geen status)';
         $server_msg = $data['message'] ?? '';
-        if ($server_msg) {
-            return ['success' => false, 'message' => 'Plaatsing mislukt: ' . wp_strip_all_tags($server_msg)];
+
+        // Toon invalid_fields als die er zijn (helpt bij debuggen)
+        $invalid = '';
+        if (!empty($data['invalid_fields'])) {
+            $names   = array_column($data['invalid_fields'], 'field');
+            $invalid = ' Ongeldige velden: ' . implode(', ', $names) . '.';
         }
 
-        return ['success' => false, 'message' => 'Plaatsing mislukt (HTTP ' . $http_code . '). Controleer of de berichttekst minimaal 50 tekens bevat.'];
+        $detail = $server_msg ? wp_strip_all_tags($server_msg) : 'HTTP ' . $http_code;
+        return ['success' => false, 'message' => 'Plaatsing mislukt [' . $status . ']:' . $invalid . ' ' . $detail];
     }
 
     /**
