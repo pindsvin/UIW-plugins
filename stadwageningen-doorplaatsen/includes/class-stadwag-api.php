@@ -446,6 +446,7 @@ class Stadwag_Api {
         $fields['remarks']             = $remarks;
         $fields['okGeneralConditions'] = 'on'; // standaard browser checkbox-waarde
         $fields['hp_website']          = '';   // honeypot: ALTIJD leeg
+        $fields['send']                = 'Verzenden'; // submit-knop: server checkt of dit aanwezig is
 
         if ( $image_file ) {
             $fields['file']       = $image_file;
