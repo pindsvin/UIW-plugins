@@ -505,13 +505,9 @@ class Stadwag_Api {
         // HTTP 200 zonder succesbericht = validatiefout
         $error_hint = $this->extract_form_error( $body );
 
-        // Toon ook welke velden gestuurd zijn (exclusief bestandsinhoud)
-        $sent_keys = array_filter( array_keys( $fields ), static fn( $k ) => ! ( $fields[ $k ] instanceof \CURLFile ) );
         return new \WP_Error(
             'stadwag_submit_failed',
-            'Formulier niet geaccepteerd (HTTP ' . $http_code . '). ' .
-            'Gestuurd: ' . implode( ', ', $sent_keys ) . '. ' .
-            'Servermelding: ' . ( $error_hint ?: '(geen tekst gevonden)' )
+            'Formulier niet geaccepteerd (HTTP ' . $http_code . '). Servermelding: ' . ( $error_hint ?: '(geen tekst gevonden)' )
         );
     }
 

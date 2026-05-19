@@ -20,9 +20,10 @@ Plaatst een WordPress-bericht door naar stadwageningen.nl/tip-de-redactie via ee
 - Sessie wordt 20 minuten gecached als WP transient
 - Velden: koptekst (post_title), tekst (post_content gestript), categorie, uitgelichte afbeelding
 - HTML en URLs worden gestript uit de tekst voor verzending
+- Server retourneert HTTP 200 met bedankpagina bij succes (géén 302-redirect) — succes wordt gedetecteerd via keywords in de response body
 
 **Instellingen:** WordPress → Instellingen → Stad Wageningen  
-**Versie:** 1.1.0
+**Versie:** 1.2.0
 
 **Bestanden:**
 - `stadwageningen-doorplaatsen.php` — plugin header, constanten
