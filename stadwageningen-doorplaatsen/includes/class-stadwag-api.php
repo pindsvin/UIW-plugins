@@ -279,22 +279,15 @@ class Stadwag_Api {
             return $creds;
         }
 
-        // Stap 2: sessie ophalen (transient of verse login)
-        $cookie = $this->get_valid_session();
+        // Stap 2: altijd vers inloggen zodat sessie- en antiforgery-cookies synchroon zijn
+        delete_transient( $this->get_session_transient_key() );
+        $cookie = $this->do_login();
         if ( is_wp_error( $cookie ) ) {
             return $cookie;
         }
 
-        // Stap 3: formulier-tokens ophalen; bij verlopen sessie eenmaal opnieuw inloggen
+        // Stap 3: formulier-tokens ophalen
         $tokens = $this->fetch_form_tokens( $cookie );
-        if ( is_wp_error( $tokens ) && $tokens->get_error_code() === 'stadwag_session_expired' ) {
-            delete_transient( $this->get_session_transient_key() );
-            $cookie = $this->do_login();
-            if ( is_wp_error( $cookie ) ) {
-                return $cookie;
-            }
-            $tokens = $this->fetch_form_tokens( $cookie );
-        }
         if ( is_wp_error( $tokens ) ) {
             return $tokens;
         }
@@ -338,11 +331,15 @@ class Stadwag_Api {
             'text'                       => $text,
             'Url'                        => '',
             'remarks'                    => $remarks,
-            'okGeneralConditions'        => 'true',
-            'hp_website'                 => '', // honeypot: ALTIJD leeg
-            'RequestName_Aes'            => $tokens['rna'],
+            'okGeneralConditions'        => '1',  // checkbox-waarde (niet 'true')
+            'hp_website'                 => '',    // honeypot: ALTIJD leeg
             '__RequestVerificationToken' => $tokens['rvt'],
         ];
+
+        // RequestName_Aes alleen meesturen als het veld gevonden werd op de formulierpagina
+        if ( $tokens['rna'] !== '' ) {
+            $fields['RequestName_Aes'] = $tokens['rna'];
+        }
 
         if ( $image_file ) {
             $fields['file']       = $image_file;
