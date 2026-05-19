@@ -259,11 +259,26 @@ class Stadwag_Api {
             return new \WP_Error( 'stadwag_token_missing', '__RequestVerificationToken niet gevonden op formulierpagina.' );
         }
 
-        // Extraheer RequestName_Aes (per-request versleuteld token)
-        $rna = '';
-        if ( preg_match( '/<input[^>]+name="RequestName_Aes"[^>]*>/i', $body, $tag_match ) ) {
-            if ( preg_match( '/value="([^"]+)"/', $tag_match[0], $val_match ) ) {
-                $rna = $val_match[1];
+        // Extraheer ALLE hidden input-velden uit het formulier
+        // (pikt automatisch RequestName_Aes, antiforgery-tokens en eventuele
+        //  toekomstige hidden fields mee — ongeacht naamswijzigingen)
+        $hidden_fields = [];
+        if ( preg_match_all( '/<input\b[^>]+>/i', $body, $input_matches ) ) {
+            foreach ( $input_matches[0] as $tag ) {
+                if ( ! preg_match( '/\btype=["\']hidden["\']/i', $tag ) ) {
+                    continue;
+                }
+                $name  = '';
+                $value = '';
+                if ( preg_match( '/\bname=["\']([^"\']+)["\']/i', $tag, $m ) ) {
+                    $name = $m[1];
+                }
+                if ( preg_match( '/\bvalue=["\']([^"\']*)["\']/i', $tag, $m ) ) {
+                    $value = html_entity_decode( $m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+                }
+                if ( $name !== '' ) {
+                    $hidden_fields[ $name ] = $value;
+                }
             }
         }
 
@@ -272,9 +287,9 @@ class Stadwag_Api {
         $merged_cookie = $this->merge_cookies( $cookie, $fresh_cookie_matches[1] ?? [] );
 
         return [
-            'rvt'    => $rvt,
-            'rna'    => $rna,
-            'cookie' => $merged_cookie,
+            'rvt'           => $rvt,
+            'hidden_fields' => $hidden_fields,
+            'cookie'        => $merged_cookie,
         ];
     }
 
@@ -341,21 +356,18 @@ class Stadwag_Api {
         }
 
         // Stap 6: POST-velden samenstellen
-        $fields = [
-            'CategoryId'                 => (string) $category_id,
-            'title'                      => $title,
-            'text'                       => $text,
-            'Url'                        => '',
-            'remarks'                    => $remarks,
-            'okGeneralConditions'        => '1',  // checkbox-waarde (niet 'true')
-            'hp_website'                 => '',    // honeypot: ALTIJD leeg
-            '__RequestVerificationToken' => $tokens['rvt'],
-        ];
+        // Begin met alle hidden fields van het formulier (tokens, antiforgery, etc.)
+        // zodat we synchroon blijven met de huidige formulierversie op de server.
+        $fields = $tokens['hidden_fields'];
 
-        // RequestName_Aes alleen meesturen als het veld gevonden werd op de formulierpagina
-        if ( $tokens['rna'] !== '' ) {
-            $fields['RequestName_Aes'] = $tokens['rna'];
-        }
+        // Voeg de gebruikersgegevens toe / overschrijf indien nodig
+        $fields['CategoryId']          = (string) $category_id;
+        $fields['title']               = $title;
+        $fields['text']                = $text;
+        $fields['Url']                 = '';
+        $fields['remarks']             = $remarks;
+        $fields['okGeneralConditions'] = 'on'; // standaard browser checkbox-waarde
+        $fields['hp_website']          = '';   // honeypot: ALTIJD leeg
 
         if ( $image_file ) {
             $fields['file']       = $image_file;
@@ -401,9 +413,13 @@ class Stadwag_Api {
         $body       = substr( $response, $header_size );
         $error_hint = $this->extract_form_error( $body );
 
+        // Toon ook welke velden gestuurd zijn (exclusief bestandsinhoud)
+        $sent_keys = array_filter( array_keys( $fields ), static fn( $k ) => ! ( $fields[ $k ] instanceof \CURLFile ) );
         return new \WP_Error(
             'stadwag_submit_failed',
-            'Formulier niet geaccepteerd (HTTP ' . $http_code . '). Servermelding: ' . ( $error_hint ?: '(geen tekst gevonden)' )
+            'Formulier niet geaccepteerd (HTTP ' . $http_code . '). ' .
+            'Gestuurd: ' . implode( ', ', $sent_keys ) . '. ' .
+            'Servermelding: ' . ( $error_hint ?: '(geen tekst gevonden)' )
         );
     }
 
