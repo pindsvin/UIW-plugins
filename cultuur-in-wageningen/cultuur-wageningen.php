@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Cultuur in Wageningen Doorplaatser
  * Description: Plaatst een WordPress bericht door naar cultuurinwageningen.nl/agenda-nieuws-plaatsen/
- * Version:     1.3.0
+ * Version:     1.3.1
  * Author:      pindsvin
  * Text Domain: cultuur-wageningen
  */
@@ -293,7 +293,7 @@ class Cultuur_Wageningen_Plugin {
             'bericht'                     => $content,
             'acceptance-335'              => 'on', // standaard browser checkbox-waarde
             'stoppert'                    => '',
-            'quiz-467'                    => 'Gelderland',
+            'quiz-467'                    => 'gelderland',
             '_wpcf7_quiz_answer_quiz-467' => $quiz_hash,
         ];
 
@@ -308,9 +308,13 @@ class Cultuur_Wageningen_Plugin {
         $response = wp_remote_post(self::CF7_API_URL, [
             'timeout' => 60,
             'headers' => [
-                'Content-Type'   => 'multipart/form-data; boundary=' . $boundary,
-                'Accept'         => 'application/json',
-                'Cookie'         => rtrim($cookie_header, '; '),
+                'Content-Type'    => 'multipart/form-data; boundary=' . $boundary,
+                'Accept'          => 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language' => 'nl-NL,nl;q=0.9',
+                'Referer'         => self::FORM_URL,
+                'Origin'          => 'https://cultuurinwageningen.nl',
+                'Cookie'          => rtrim($cookie_header, '; '),
+                'X-Requested-With' => 'XMLHttpRequest',
             ],
             'body'    => $body,
         ]);
