@@ -103,6 +103,29 @@ class Stadwag_Admin {
             $out['pass_enc'] = $current['pass_enc'] ?? '';
         }
 
+        // Verbindingstest: probeer in te loggen met de opgeslagen gegevens
+        if ( ! empty( $out['email'] ) && ! empty( $out['pass_enc'] ) ) {
+            // Sla tijdelijk op zodat get_credentials() het kan lezen
+            update_option( 'stadwag_settings', $out );
+            $result = $api->get_valid_session();
+
+            if ( is_wp_error( $result ) ) {
+                add_settings_error(
+                    'stadwag_settings',
+                    'stadwag_login_failed',
+                    '⚠️ Inloggen bij Stad Wageningen mislukt: ' . esc_html( $result->get_error_message() ),
+                    'error'
+                );
+            } else {
+                add_settings_error(
+                    'stadwag_settings',
+                    'stadwag_login_ok',
+                    '✅ Verbinding met Stad Wageningen werkt — inloggen gelukt.',
+                    'updated'
+                );
+            }
+        }
+
         return $out;
     }
 
