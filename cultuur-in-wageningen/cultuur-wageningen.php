@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Cultuur in Wageningen Doorplaatser
  * Description: Plaatst een WordPress bericht door naar cultuurinwageningen.nl/agenda-nieuws-plaatsen/
- * Version:     1.4.0
+ * Version:     1.3.2
  * Author:      pindsvin
  * Text Domain: cultuur-wageningen
  */
