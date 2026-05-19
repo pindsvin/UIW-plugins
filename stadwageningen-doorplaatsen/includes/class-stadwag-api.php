@@ -135,7 +135,7 @@ class Stadwag_Api {
 
         $fields = [];
 
-        // Alle <input> velden
+        // Alle <input> velden (inclusief file-inputs om de bestandsveldnaam te zien)
         if ( preg_match_all( '/<input\b([^>]+)>/i', $body, $matches ) ) {
             foreach ( $matches[1] as $attrs ) {
                 $name  = '';
@@ -146,6 +146,9 @@ class Stadwag_Api {
                 if ( preg_match( '/\bvalue=["\']([^"\']*)["\']/i', $attrs, $m ) ) { $value = $m[1]; }
                 if ( $name !== '' ) {
                     $fields[] = [ 'tag' => 'input', 'type' => $type, 'name' => $name, 'value' => substr( $value, 0, 80 ) ];
+                } elseif ( $type === 'file' ) {
+                    // File inputs hebben soms geen name, toon ze toch
+                    $fields[] = [ 'tag' => 'input', 'type' => 'file', 'name' => '(geen name)', 'value' => '' ];
                 }
             }
         }
@@ -483,13 +486,23 @@ class Stadwag_Api {
             return new \WP_Error( 'stadwag_curl_error', 'cURL fout (formulier versturen): ' . $curl_error );
         }
 
-        // HTTP 302 = formulier geaccepteerd
+        // HTTP 302 = formulier geaccepteerd (standaard ASP.NET redirect na succes)
         if ( $http_code === 302 ) {
             return true;
         }
 
-        // HTTP 200 = validatiefout; probeer foutmelding te extraheren
-        $body       = substr( $response, $header_size );
+        $body = substr( $response, $header_size );
+
+        // Sommige servers sturen HTTP 200 met een bedankpagina i.p.v. 302
+        $success_patterns = [ 'bedankt', 'ontvangen', 'verstuurd', 'geplaatst', 'succes', 'thank you', 'submitted' ];
+        $body_lower = strtolower( $body );
+        foreach ( $success_patterns as $pattern ) {
+            if ( str_contains( $body_lower, $pattern ) ) {
+                return true;
+            }
+        }
+
+        // HTTP 200 zonder succesbericht = validatiefout
         $error_hint = $this->extract_form_error( $body );
 
         // Toon ook welke velden gestuurd zijn (exclusief bestandsinhoud)
@@ -571,12 +584,12 @@ class Stadwag_Api {
             $text = preg_replace( '/\s+/', ' ', $text );
             $text = trim( $text );
             if ( $text !== '' ) {
-                return mb_substr( $text, 0, 500 );
+                return mb_substr( $text, 0, 2000 );
             }
         }
-        // Laatste redmiddel: eerste 500 tekens van de gestripte body
+        // Laatste redmiddel: eerste 2000 tekens van de gestripte body
         $text = wp_strip_all_tags( $body );
         $text = preg_replace( '/\s+/', ' ', $text );
-        return mb_substr( trim( $text ), 0, 500 );
+        return mb_substr( trim( $text ), 0, 2000 );
     }
 }
