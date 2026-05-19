@@ -390,7 +390,7 @@ class Stadwag_Api {
 
         return new \WP_Error(
             'stadwag_submit_failed',
-            'Formulier niet geaccepteerd (HTTP ' . $http_code . ')' . ( $error_hint ? ': ' . $error_hint : '.' )
+            'Formulier niet geaccepteerd (HTTP ' . $http_code . '). Servermelding: ' . ( $error_hint ?: '(geen tekst gevonden)' )
         );
     }
 
@@ -446,6 +446,7 @@ class Stadwag_Api {
 
     /**
      * Probeert een leesbare foutmelding uit de formulierrespons te halen.
+     * Geeft altijd iets terug zodat de oorzaak van een HTTP 200 zichtbaar wordt.
      */
     private function extract_form_error( string $body ): string {
         // ASP.NET validation-summary
@@ -456,6 +457,18 @@ class Stadwag_Api {
         if ( preg_match_all( '/<span[^>]+class="[^"]*field-validation-error[^"]*"[^>]*>([^<]+)<\/span>/i', $body, $m ) ) {
             return implode( '; ', $m[1] );
         }
-        return '';
+        // Fallback: probeer de <main>-inhoud te pakken
+        if ( preg_match( '/<main[^>]*>(.*?)<\/main>/si', $body, $m ) ) {
+            $text = wp_strip_all_tags( $m[1] );
+            $text = preg_replace( '/\s+/', ' ', $text );
+            $text = trim( $text );
+            if ( $text !== '' ) {
+                return mb_substr( $text, 0, 500 );
+            }
+        }
+        // Laatste redmiddel: eerste 500 tekens van de gestripte body
+        $text = wp_strip_all_tags( $body );
+        $text = preg_replace( '/\s+/', ' ', $text );
+        return mb_substr( trim( $text ), 0, 500 );
     }
 }
