@@ -302,8 +302,10 @@ class Stadwag_Api {
         // Stap 4: WordPress-berichtdata ophalen en saniteren
         $post    = get_post( $post_id );
         $title   = mb_substr( wp_strip_all_tags( $post->post_title ), 0, 640 );
-        $content = wp_strip_all_tags( apply_filters( 'the_content', $post->post_content ) );
-        $text    = mb_substr( $content, 0, 3000 );
+        $content = wp_strip_all_tags( strip_shortcodes( $post->post_content ) );
+        $content = preg_replace( '/https?:\/\/\S+/u', '', $content ); // verwijder losse URLs
+        $content = preg_replace( '/[ \t]+/', ' ', $content );         // opruimen dubbele spaties
+        $text    = mb_substr( trim( $content ), 0, 3000 );
         $remarks = mb_substr( $remarks, 0, 250 );
 
         // Stap 5: uitgelichte afbeelding voorbereiden

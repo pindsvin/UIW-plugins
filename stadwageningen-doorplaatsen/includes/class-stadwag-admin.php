@@ -286,7 +286,10 @@ class Stadwag_Admin {
         $remarks     = sanitize_textarea_field( $_POST['remarks'] ?? '' );
 
         $title   = mb_substr( wp_strip_all_tags( $post->post_title ), 0, 640 );
-        $content = wp_strip_all_tags( apply_filters( 'the_content', $post->post_content ) );
+        $content = wp_strip_all_tags( strip_shortcodes( $post->post_content ) );
+        $content = preg_replace( '/https?:\/\/\S+/u', '', $content );
+        $content = preg_replace( '/[ \t]+/', ' ', $content );
+        $content = trim( $content );
         $excerpt = mb_substr( $content, 0, 300 ) . ( mb_strlen( $content ) > 300 ? '…' : '' );
 
         // Afbeelding
