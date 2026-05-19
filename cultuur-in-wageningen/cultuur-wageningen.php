@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Cultuur in Wageningen Doorplaatser
  * Description: Plaatst een WordPress bericht door naar cultuurinwageningen.nl/agenda-nieuws-plaatsen/
- * Version:     1.3.1
+ * Version:     1.4.0
  * Author:      pindsvin
  * Text Domain: cultuur-wageningen
  */
@@ -21,11 +21,174 @@ class Cultuur_Wageningen_Plugin {
     const META_KEY       = '_cultuur_wageningen_submitted';
 
     public function __construct() {
-        add_action('add_meta_boxes',                          [$this, 'add_metabox']);
-        add_action('admin_enqueue_scripts',                   [$this, 'enqueue_scripts']);
-        add_action('wp_ajax_cultuur_wageningen_preview',      [$this, 'ajax_preview']);
-        add_action('wp_ajax_cultuur_wageningen_submit',       [$this, 'ajax_submit']);
+        add_action('add_meta_boxes',                                [$this, 'add_metabox']);
+        add_action('admin_enqueue_scripts',                         [$this, 'enqueue_scripts']);
+        add_action('admin_menu',                                    [$this, 'add_admin_page']);
+        add_action('wp_ajax_cultuur_wageningen_save_submitted',     [$this, 'ajax_save_submitted']);
     }
+
+    /* ------------------------------------------------------------------
+     * Admin page (opens in new tab)
+     * ------------------------------------------------------------------ */
+
+    public function add_admin_page() {
+        add_submenu_page(
+            null,                                        // hidden — no menu entry
+            'Doorplaatsen naar Cultuur in Wageningen',
+            'Doorplaatsen',
+            'edit_posts',
+            'cultuur-wageningen-doorplaats',
+            [$this, 'render_form_page']
+        );
+    }
+
+    public function render_form_page() {
+        $post_id = intval($_GET['post_id'] ?? 0);
+        $nonce   = sanitize_text_field($_GET['nonce'] ?? '');
+
+        if (!wp_verify_nonce($nonce, 'cultuur_wageningen_doorplaats_' . $post_id)) {
+            wp_die('Ongeldig verzoek.', 'Fout', ['response' => 403]);
+        }
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_die('Onvoldoende rechten.', 'Fout', ['response' => 403]);
+        }
+
+        $post = get_post($post_id);
+        if (!$post) {
+            wp_die('Bericht niet gevonden.', 'Fout', ['response' => 404]);
+        }
+
+        $user    = wp_get_current_user();
+        $content = $this->html_to_plain($post->post_content);
+
+        // Fetch quiz hash + CF7 metadata from the live form page.
+        [$quiz_hash, , $cf7_meta] = $this->fetch_quiz_hash();
+
+        $already_submitted = get_post_meta($post_id, self::META_KEY, true);
+        $save_nonce        = wp_create_nonce('cultuur_wageningen_save_submitted');
+
+        $wpcf7_id       = self::WPCF7_ID;
+        $wpcf7_version  = $cf7_meta['version']        ?? self::WPCF7_VERSION;
+        $wpcf7_locale   = $cf7_meta['locale']         ?? self::WPCF7_LOCALE;
+        $wpcf7_unit_tag = $cf7_meta['unit_tag']       ?? self::WPCF7_UNIT_TAG;
+        $wpcf7_post     = $cf7_meta['container_post'] ?? self::WPCF7_POST;
+        ?>
+        <div class="wrap">
+            <h1>Doorplaatsen naar Cultuur in Wageningen</h1>
+
+            <?php if ($already_submitted) : ?>
+                <div class="notice notice-warning inline" style="margin-bottom:16px;">
+                    <p>Dit bericht is eerder verstuurd op <?php echo esc_html(date_i18n('d-m-Y H:i', $already_submitted)); ?>. Je kunt het opnieuw versturen.</p>
+                </div>
+            <?php endif; ?>
+
+            <?php if (!$quiz_hash) : ?>
+
+                <div class="notice notice-error">
+                    <p><strong>Kon het formulier op Cultuur in Wageningen niet bereiken.</strong> Sluit dit tabblad en probeer opnieuw.</p>
+                </div>
+
+            <?php else : ?>
+
+            <form id="ciw-doorplaats-form">
+
+                <?php /* CF7 hidden metadata */ ?>
+                <input type="hidden" name="_wpcf7"                      value="<?php echo esc_attr($wpcf7_id); ?>">
+                <input type="hidden" name="_wpcf7_version"              value="<?php echo esc_attr($wpcf7_version); ?>">
+                <input type="hidden" name="_wpcf7_locale"               value="<?php echo esc_attr($wpcf7_locale); ?>">
+                <input type="hidden" name="_wpcf7_unit_tag"             value="<?php echo esc_attr($wpcf7_unit_tag); ?>">
+                <input type="hidden" name="_wpcf7_container_post"       value="<?php echo esc_attr($wpcf7_post); ?>">
+                <input type="hidden" name="_wpcf7_posted_data_hash"     value="">
+                <?php /* Quiz spam-bescherming */ ?>
+                <input type="hidden" name="quiz-467"                    value="gelderland">
+                <input type="hidden" name="_wpcf7_quiz_answer_quiz-467" value="<?php echo esc_attr($quiz_hash); ?>">
+                <?php /* Honeypot: leeg laten */ ?>
+                <input type="hidden" name="stoppert"                    value="">
+
+                <table class="form-table" style="max-width:820px;">
+                    <tr>
+                        <th scope="row"><label for="ciw-naam">Naam</label></th>
+                        <td>
+                            <input type="text" id="ciw-naam" name="naam"
+                                   value="<?php echo esc_attr($user->display_name); ?>"
+                                   class="regular-text" required>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ciw-email">E-mail</label></th>
+                        <td>
+                            <input type="email" id="ciw-email" name="email"
+                                   value="<?php echo esc_attr($user->user_email); ?>"
+                                   class="regular-text" required>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ciw-titel">Titel</label></th>
+                        <td>
+                            <input type="text" id="ciw-titel" name="titel"
+                                   value="<?php echo esc_attr($post->post_title); ?>"
+                                   class="large-text" required>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ciw-bericht">Bericht</label></th>
+                        <td>
+                            <textarea id="ciw-bericht" name="bericht"
+                                      rows="12" class="large-text"
+                                      required><?php echo esc_textarea($content); ?></textarea>
+                            <p class="description">Minimaal 50 tekens. Je kunt de tekst hier nog aanpassen voor verzending.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ciw-afbeelding">Afbeelding</label></th>
+                        <td>
+                            <input type="file" id="ciw-afbeelding" name="file-100"
+                                   accept="image/jpeg,image/png,image/gif">
+                            <p class="description">Maximaal 1&nbsp;MB. Optioneel — JPEG, PNG of GIF.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Voorwaarden</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" id="ciw-acceptance"
+                                       name="acceptance-335" value="on">
+                                Ik ga akkoord met de voorwaarden van Cultuur in Wageningen
+                            </label>
+                            <p class="description">Verplicht — de verzendknop wordt actief na aanvinken.</p>
+                        </td>
+                    </tr>
+                </table>
+
+                <p style="margin-top:20px;">
+                    <button type="submit" id="ciw-submit-btn"
+                            class="button button-primary button-large" disabled>
+                        Versturen naar Cultuur in Wageningen
+                    </button>
+                    <span id="ciw-spinner" class="spinner"
+                          style="float:none;visibility:hidden;margin:0 8px 0 4px;"></span>
+                </p>
+            </form>
+
+            <div id="ciw-result" style="margin-top:20px;max-width:820px;"></div>
+
+            <?php endif; // quiz_hash ?>
+        </div>
+
+        <script>
+        var ciw = <?php echo wp_json_encode([
+            'cfApiUrl'  => self::CF7_API_URL,
+            'ajaxUrl'   => admin_url('admin-ajax.php'),
+            'saveNonce' => $save_nonce,
+            'postId'    => $post_id,
+        ]); ?>;
+        </script>
+        <?php
+    }
+
+    /* ------------------------------------------------------------------
+     * Metabox (sidebar on post edit screen)
+     * ------------------------------------------------------------------ */
 
     public function add_metabox() {
         add_meta_box(
@@ -39,8 +202,13 @@ class Cultuur_Wageningen_Plugin {
     }
 
     public function render_metabox($post) {
-        wp_nonce_field('cultuur_wageningen_submit', 'cultuur_wageningen_nonce');
         $submitted = get_post_meta($post->ID, self::META_KEY, true);
+        $nonce     = wp_create_nonce('cultuur_wageningen_doorplaats_' . $post->ID);
+        $url       = add_query_arg([
+            'page'    => 'cultuur-wageningen-doorplaats',
+            'post_id' => $post->ID,
+            'nonce'   => $nonce,
+        ], admin_url('admin.php'));
         ?>
         <div id="cultuur-wageningen-box">
             <?php if ($submitted) : ?>
@@ -48,121 +216,58 @@ class Cultuur_Wageningen_Plugin {
                     ✓ Verstuurd op <?php echo esc_html(date_i18n('d-m-Y H:i', $submitted)); ?>
                 </p>
             <?php endif; ?>
-            <p style="margin:0 0 8px;">
-                <button type="button"
-                        id="cultuur-wageningen-preview-btn"
-                        class="button button-secondary"
-                        data-post-id="<?php echo esc_attr($post->ID); ?>">
-                    Controleer voor verzending
-                </button>
+            <p style="margin:0;">
+                <a href="<?php echo esc_url($url); ?>"
+                   target="_blank"
+                   class="button button-primary">
+                    Doorplaatsen &rarr;
+                </a>
             </p>
-            <div id="cultuur-wageningen-preview" style="display:none;margin:8px 0;padding:8px;background:#f6f7f7;border:1px solid #ddd;font-size:12px;line-height:1.5;"></div>
-            <p style="margin:0 0 8px;display:none;" id="cultuur-wageningen-submit-wrap">
-                <button type="button"
-                        id="cultuur-wageningen-btn"
-                        class="button button-primary"
-                        data-post-id="<?php echo esc_attr($post->ID); ?>">
-                    Bevestig en verstuur
-                </button>
-            </p>
-            <div id="cultuur-wageningen-status"></div>
         </div>
         <?php
     }
 
+    /* ------------------------------------------------------------------
+     * Scripts
+     * ------------------------------------------------------------------ */
+
     public function enqueue_scripts($hook) {
-        if (!in_array($hook, ['post.php', 'post-new.php'], true)) {
-            return;
+        // doorplaats.js alleen laden op de doorplaats-pagina (nieuw tabblad).
+        if ($hook === 'admin_page_cultuur-wageningen-doorplaats') {
+            wp_enqueue_script(
+                'cultuur-wageningen-doorplaats',
+                plugin_dir_url(__FILE__) . 'doorplaats.js',
+                [],
+                '1.4.0',
+                true   // footer — zodat <script>var ciw=…</script> al beschikbaar is
+            );
         }
-        wp_enqueue_script(
-            'cultuur-wageningen-admin',
-            plugin_dir_url(__FILE__) . 'admin.js',
-            ['jquery'],
-            '1.1.0',
-            true
-        );
-        wp_localize_script('cultuur-wageningen-admin', 'cultuurWageningen', [
-            'ajaxUrl' => admin_url('admin-ajax.php'),
-        ]);
     }
 
-    public function ajax_preview() {
-        check_ajax_referer('cultuur_wageningen_submit', 'nonce');
+    /* ------------------------------------------------------------------
+     * AJAX: sla tijdstip op na succesvolle browsersubmissie
+     * ------------------------------------------------------------------ */
+
+    public function ajax_save_submitted() {
+        check_ajax_referer('cultuur_wageningen_save_submitted', 'nonce');
 
         if (!current_user_can('edit_posts')) {
             wp_send_json_error(['message' => 'Onvoldoende rechten.']);
         }
 
         $post_id = intval($_POST['post_id'] ?? 0);
-        $post    = get_post($post_id);
-
-        if (!$post) {
-            wp_send_json_error(['message' => 'Bericht niet gevonden.']);
+        if (!$post_id) {
+            wp_send_json_error(['message' => 'Ongeldig bericht-ID.']);
         }
 
-        $user    = wp_get_current_user();
-        $content = $this->html_to_plain($post->post_content);
-        $image   = $this->get_featured_image($post_id);
-
-        if (mb_strlen($content) < 50) {
-            wp_send_json_error(['message' => 'De berichttekst is te kort (minimaal 50 tekens vereist).']);
-        }
-
-        $preview = [
-            'naam'   => $user->display_name,
-            'email'  => $user->user_email,
-            'titel'  => $post->post_title,
-            'bericht' => mb_substr($content, 0, 300) . (mb_strlen($content) > 300 ? '…' : ''),
-            'afbeelding' => $image ? $image['name'] : '(geen afbeelding — wordt niet meegestuurd)',
-        ];
-
-        wp_send_json_success($preview);
+        update_post_meta($post_id, self::META_KEY, time());
+        wp_send_json_success(['message' => 'Opgeslagen.']);
     }
 
-    public function ajax_submit() {
-        check_ajax_referer('cultuur_wageningen_submit', 'nonce');
+    /* ------------------------------------------------------------------
+     * Helper: haal quiz-hash + CF7-metadata op van de live formulierpagina
+     * ------------------------------------------------------------------ */
 
-        if (!current_user_can('edit_posts')) {
-            wp_send_json_error(['message' => 'Onvoldoende rechten.']);
-        }
-
-        $post_id = intval($_POST['post_id'] ?? 0);
-        $post    = get_post($post_id);
-
-        if (!$post) {
-            wp_send_json_error(['message' => 'Bericht niet gevonden.']);
-        }
-
-        $user = wp_get_current_user();
-
-        [$quiz_hash, $cookies, $cf7_meta] = $this->fetch_quiz_hash();
-
-        if (!$quiz_hash) {
-            wp_send_json_error(['message' => 'Kon het Cultuur Wageningen formulier niet bereiken. Probeer het opnieuw.']);
-        }
-
-        $image  = $this->get_featured_image($post_id);
-        $result = $this->submit_form($post, $user, $quiz_hash, $cookies, $image, $cf7_meta);
-
-        if (!empty($image['tmp']) && file_exists($image['path'])) {
-            @unlink($image['path']);
-        }
-
-        if ($result['success']) {
-            update_post_meta($post_id, self::META_KEY, time());
-            wp_send_json_success(['message' => $result['message']]);
-        } else {
-            wp_send_json_error(['message' => $result['message']]);
-        }
-    }
-
-    /**
-     * GET the form page and extract all CF7 metadata + quiz hash + cookies.
-     * Haalt _wpcf7_version, _wpcf7_unit_tag en quiz-hash dynamisch op
-     * zodat we altijd synchroon blijven met de actuele formulierversie.
-     *
-     * @return array [string|null $quiz_hash, array $cookies, array $cf7_meta]
-     */
     private function fetch_quiz_hash() {
         $response = wp_remote_get(self::FORM_URL, [
             'timeout'    => 30,
@@ -182,7 +287,6 @@ class Cultuur_Wageningen_Plugin {
         $quiz_hash = $m[1];
         $cookies   = wp_remote_retrieve_cookies($response);
 
-        // Haal CF7-metadata op uit de wpcf7 shortcode / hidden fields
         $cf7_meta = [];
         if (preg_match('/name="_wpcf7_version"\s+value="([^"]+)"/', $body, $vm)) {
             $cf7_meta['version'] = $vm[1];
@@ -200,183 +304,11 @@ class Cultuur_Wageningen_Plugin {
         return [$quiz_hash, $cookies, $cf7_meta];
     }
 
-    /**
-     * Return info about the post's featured image.
-     * If the file exceeds 1 MB, it is resized to fit within that limit.
-     *
-     * @return array|null ['path'=>string, 'name'=>string, 'mime'=>string, 'tmp'=>bool]
-     */
-    private function get_featured_image($post_id) {
-        $thumb_id = get_post_thumbnail_id($post_id);
-        if (!$thumb_id) {
-            return null;
-        }
+    /* ------------------------------------------------------------------
+     * Helper: HTML post-inhoud omzetten naar platte tekst
+     * ------------------------------------------------------------------ */
 
-        $file = get_attached_file($thumb_id);
-        if (!$file || !file_exists($file)) {
-            return null;
-        }
-
-        $allowed_mime = ['image/jpeg', 'image/png', 'image/gif'];
-        $mime         = get_post_mime_type($thumb_id);
-        if (!in_array($mime, $allowed_mime, true)) {
-            return null;
-        }
-
-        $max_bytes = 1 * 1024 * 1024;
-
-        if (filesize($file) <= $max_bytes) {
-            return ['path' => $file, 'name' => basename($file), 'mime' => $mime, 'tmp' => false];
-        }
-
-        // Resize until under 1 MB, halving the width each attempt.
-        $editor = wp_get_image_editor($file);
-        if (is_wp_error($editor)) {
-            return null;
-        }
-
-        $size  = $editor->get_size();
-        $width = (int) $size['width'];
-
-        $tmp_path = null;
-        for ($i = 0; $i < 5; $i++) {
-            $width = (int) ($width * 0.75);
-            $editor->resize($width, null, false);
-
-            $tmp_path = tempnam(sys_get_temp_dir(), 'ciw_') . '.' . pathinfo($file, PATHINFO_EXTENSION);
-            $saved    = $editor->save($tmp_path);
-
-            if (is_wp_error($saved)) {
-                return null;
-            }
-
-            if (filesize($tmp_path) <= $max_bytes) {
-                return ['path' => $tmp_path, 'name' => basename($file), 'mime' => $mime, 'tmp' => true];
-            }
-
-            // Still too large — try again from the resized version.
-            $editor = wp_get_image_editor($tmp_path);
-            if (is_wp_error($editor)) {
-                return null;
-            }
-        }
-
-        // Could not get under 1 MB after 5 attempts.
-        if ($tmp_path && file_exists($tmp_path)) {
-            @unlink($tmp_path);
-        }
-        return null;
-    }
-
-    /**
-     * Build a multipart/form-data POST body and send it to the CF7 REST API.
-     */
-    private function submit_form($post, $user, $quiz_hash, $cookies, $image, array $cf7_meta = []) {
-        $content = $this->html_to_plain($post->post_content);
-
-        if (mb_strlen($content) < 50) {
-            return ['success' => false, 'message' => 'De berichttekst is te kort (minimaal 50 tekens vereist).'];
-        }
-
-        // Gebruik dynamisch opgehaalde CF7-metadata als die beschikbaar is,
-        // val terug op de hardcoded constanten.
-        $fields = [
-            '_wpcf7'                      => self::WPCF7_ID,
-            '_wpcf7_version'              => $cf7_meta['version']        ?? self::WPCF7_VERSION,
-            '_wpcf7_locale'               => $cf7_meta['locale']         ?? self::WPCF7_LOCALE,
-            '_wpcf7_unit_tag'             => $cf7_meta['unit_tag']       ?? self::WPCF7_UNIT_TAG,
-            '_wpcf7_container_post'       => $cf7_meta['container_post'] ?? self::WPCF7_POST,
-            '_wpcf7_posted_data_hash'     => '',
-            'naam'                        => $user->display_name,
-            'email'                       => $user->user_email,
-            'titel'                       => $post->post_title,
-            'bericht'                     => $content,
-            'acceptance-335'              => 'on', // standaard browser checkbox-waarde
-            'stoppert'                    => '',
-            'quiz-467'                    => 'gelderland',
-            '_wpcf7_quiz_answer_quiz-467' => $quiz_hash,
-        ];
-
-        $boundary = '----------WPCultuurWageningen' . md5(uniqid('', true));
-        $body     = $this->build_multipart_body($boundary, $fields, $image);
-
-        $cookie_header = '';
-        foreach ($cookies as $c) {
-            $cookie_header .= $c->name . '=' . $c->value . '; ';
-        }
-
-        $response = wp_remote_post(self::CF7_API_URL, [
-            'timeout' => 60,
-            'headers' => [
-                'Content-Type'    => 'multipart/form-data; boundary=' . $boundary,
-                'Accept'          => 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language' => 'nl-NL,nl;q=0.9',
-                'Referer'         => self::FORM_URL,
-                'Origin'          => 'https://cultuurinwageningen.nl',
-                'Cookie'          => rtrim($cookie_header, '; '),
-                'X-Requested-With' => 'XMLHttpRequest',
-            ],
-            'body'    => $body,
-        ]);
-
-        if (is_wp_error($response)) {
-            return ['success' => false, 'message' => 'Verbindingsfout: ' . $response->get_error_message()];
-        }
-
-        $http_code = wp_remote_retrieve_response_code($response);
-        $data      = json_decode(wp_remote_retrieve_body($response), true);
-
-        if (isset($data['status']) && $data['status'] === 'mail_sent') {
-            return ['success' => true, 'message' => 'Bericht succesvol geplaatst op Cultuur in Wageningen!'];
-        }
-
-        $status     = $data['status']  ?? '(geen status)';
-        $server_msg = $data['message'] ?? '';
-
-        // Toon invalid_fields als die er zijn (helpt bij debuggen)
-        $invalid = '';
-        if (!empty($data['invalid_fields'])) {
-            $names   = array_column($data['invalid_fields'], 'field');
-            $invalid = ' Ongeldige velden: ' . implode(', ', $names) . '.';
-        }
-
-        $detail = $server_msg ? wp_strip_all_tags($server_msg) : 'HTTP ' . $http_code;
-        return ['success' => false, 'message' => 'Plaatsing mislukt [' . $status . ']:' . $invalid . ' ' . $detail];
-    }
-
-    /**
-     * Build a raw multipart/form-data body string.
-     */
-    private function build_multipart_body($boundary, array $fields, $image) {
-        $eol  = "\r\n";
-        $body = '';
-
-        foreach ($fields as $name => $value) {
-            $body .= "--{$boundary}{$eol}";
-            $body .= "Content-Disposition: form-data; name=\"{$name}\"{$eol}{$eol}";
-            $body .= $value . $eol;
-        }
-
-        if ($image) {
-            $file_data = file_get_contents($image['path']);
-            if ($file_data !== false) {
-                $body .= "--{$boundary}{$eol}";
-                $body .= "Content-Disposition: form-data; name=\"file-100\"; filename=\"{$image['name']}\"{$eol}";
-                $body .= "Content-Type: {$image['mime']}{$eol}{$eol}";
-                $body .= $file_data . $eol;
-            }
-        }
-
-        $body .= "--{$boundary}--{$eol}";
-
-        return $body;
-    }
-
-    /**
-     * Convert HTML post content to plain text suitable for the CF7 textarea.
-     */
     private function html_to_plain($html) {
-        // Preserve paragraph/line breaks before stripping tags
         $text = preg_replace('/<\/p\s*>/i', "\n\n", $html);
         $text = preg_replace('/<br\s*\/?>/i', "\n", $text);
         $text = wp_strip_all_tags($text);

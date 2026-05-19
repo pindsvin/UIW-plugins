@@ -42,26 +42,26 @@ Plaatst een WordPress-bericht door naar stadwageningen.nl/tip-de-redactie via ee
 
 Plaatst een WordPress-bericht door naar cultuurinwageningen.nl via hun Contact Form 7-formulier (CF7 REST API).
 
-**Werking:**
-- Knop in de zijbalk van de bericht-editor
-- Twee-stap flow: eerst voorvertoning (naam, e-mail, titel, tekst, afbeelding), dan bevestigen
-- Haalt eerst de CF7-pagina op om een quiz-hash op te halen (spam-bescherming)
-- Verstuurt via multipart POST naar de CF7 REST API (`/wp-json/contact-form-7/v1/contact-forms/5315/feedback`)
-- Uitgelichte afbeelding wordt meegestuurd; indien >1 MB wordt die automatisch verkleind (max 5 pogingen, steeds 75% van de breedte)
-- HTML wordt omgezet naar platte tekst; minimaal 50 tekens vereist
-- Na succesvolle verzending wordt tijdstip opgeslagen als post meta (`_cultuur_wageningen_submitted`)
+**Werking (v1.4.0 — browser-side submission):**
+- Knop "Doorplaatsen →" in de zijbalk opent een **nieuw tabblad** met een pre-ingevuld formulier
+- PHP haalt de CF7-pagina op om quiz-hash + metadata op te halen (spam-bescherming)
+- Gebruiker upload zelf de afbeelding, vinkt de voorwaarden aan en drukt op Verzenden
+- **De browser stuurt de POST rechtstreeks naar cultuurinwageningen.nl** (geen WP-server tussenin)
+- Ziet er voor de ontvanger identiek uit aan een gewone bezoeker die het formulier invult
+- Bij succes: tijdstip wordt opgeslagen als post meta via apart WP AJAX-verzoek (`_cultuur_wageningen_submitted`)
 
 **Instellingen:** geen aparte instellingenpagina — werkt op basis van de ingelogde WordPress-gebruiker (naam + e-mail)  
-**Versie:** 1.2.0
+**Versie:** 1.4.0
 
 **Bestanden:**
-- `cultuur-wageningen.php` — volledige plugin (één bestand: plugin header, klasse, AJAX handlers, hulpfuncties)
-- `admin.js` — jQuery UI (twee-stap flow: preview → bevestig en verstuur)
+- `cultuur-wageningen.php` — plugin header, klasse, PHP-formulierrenderer, AJAX save-handler
+- `doorplaats.js` — browser-side fetch() naar CF7 REST API, resultaatverwerking
+- `admin.js` — niet meer in gebruik (metabox is nu een plain link)
 
 **CF7-formulier op cultuurinwageningen.nl:**
 - Form ID: 5315
 - Container post: 447
-- Quiz-veld: `quiz-467` (antwoord: `Gelderland`, hash wordt dynamisch opgehaald)
+- Quiz-veld: `quiz-467` (antwoord: `gelderland` — lowercase, hash wordt dynamisch opgehaald)
 
 ---
 
