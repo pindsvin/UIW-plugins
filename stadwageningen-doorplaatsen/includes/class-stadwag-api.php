@@ -98,6 +98,80 @@ class Stadwag_Api {
     }
 
     /**
+     * Inspecteert het formulier op de tip-de-redactie pagina.
+     * Geeft alle inputs, selects en textareas terug zodat je kunt zien
+     * welke velden de server momenteel verwacht.
+     *
+     * @return array|WP_Error
+     */
+    public function inspect_form(): array|\WP_Error {
+        $cookie = $this->do_login();
+        if ( is_wp_error( $cookie ) ) {
+            return $cookie;
+        }
+
+        $tokens = $this->fetch_form_tokens( $cookie );
+        if ( is_wp_error( $tokens ) ) {
+            return $tokens;
+        }
+
+        // Haal de ruwe HTML opnieuw op (fetch_form_tokens heeft al geparsed,
+        // maar we hebben de volledige body nodig voor selects en checkboxes)
+        $form_url = STADWAG_TARGET_BASE . STADWAG_FORM_PATH;
+        $ch = curl_init( $form_url );
+        curl_setopt_array( $ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER         => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; WP-Doorplaatsen/1.0)',
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_HTTPHEADER     => [ 'Cookie: ' . $tokens['cookie'] ],
+        ] );
+        $response    = curl_exec( $ch );
+        $header_size = curl_getinfo( $ch, CURLINFO_HEADER_SIZE );
+        curl_close( $ch );
+        $body = substr( $response, $header_size );
+
+        $fields = [];
+
+        // Alle <input> velden
+        if ( preg_match_all( '/<input\b([^>]+)>/i', $body, $matches ) ) {
+            foreach ( $matches[1] as $attrs ) {
+                $name  = '';
+                $type  = 'text';
+                $value = '';
+                if ( preg_match( '/\bname=["\']([^"\']+)["\']/i', $attrs, $m ) )  { $name  = $m[1]; }
+                if ( preg_match( '/\btype=["\']([^"\']+)["\']/i', $attrs, $m ) )  { $type  = $m[1]; }
+                if ( preg_match( '/\bvalue=["\']([^"\']*)["\']/i', $attrs, $m ) ) { $value = $m[1]; }
+                if ( $name !== '' ) {
+                    $fields[] = [ 'tag' => 'input', 'type' => $type, 'name' => $name, 'value' => substr( $value, 0, 80 ) ];
+                }
+            }
+        }
+
+        // Alle <select> velden met hun opties
+        if ( preg_match_all( '/<select\b[^>]*name=["\']([^"\']+)["\'][^>]*>(.*?)<\/select>/is', $body, $sel_matches ) ) {
+            foreach ( $sel_matches[1] as $i => $sel_name ) {
+                $options = [];
+                if ( preg_match_all( '/<option\b[^>]*value=["\']([^"\']*)["\'][^>]*>/i', $sel_matches[2][ $i ], $opt_m ) ) {
+                    $options = $opt_m[1];
+                }
+                $fields[] = [ 'tag' => 'select', 'type' => 'select', 'name' => $sel_name, 'value' => implode( ' | ', $options ) ];
+            }
+        }
+
+        // Alle <textarea> velden
+        if ( preg_match_all( '/<textarea\b[^>]*name=["\']([^"\']+)["\']/i', $body, $ta_matches ) ) {
+            foreach ( $ta_matches[1] as $ta_name ) {
+                $fields[] = [ 'tag' => 'textarea', 'type' => 'textarea', 'name' => $ta_name, 'value' => '' ];
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
      * Logt in op Stad Wageningen en slaat sessie-cookie op als transient.
      * Optioneel: meegegeven $email/$password gebruiken i.p.v. opgeslagen credentials.
      *

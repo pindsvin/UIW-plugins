@@ -10,6 +10,7 @@ class Stadwag_Admin {
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_metabox_assets' ] );
         add_action( 'wp_ajax_stadwag_doorplaatsen',        [ $this, 'handle_ajax' ] );
         add_action( 'wp_ajax_stadwag_preview',             [ $this, 'handle_preview_ajax' ] );
+        add_action( 'wp_ajax_stadwag_inspect_form',        [ $this, 'handle_inspect_ajax' ] );
     }
 
     // -------------------------------------------------------------------------
@@ -84,6 +85,48 @@ class Stadwag_Admin {
                 submit_button( 'Instellingen opslaan' );
                 ?>
             </form>
+
+            <hr>
+            <h2>Formulier inspecteren</h2>
+            <p>Haal de huidige veldnamen en waarden op van het formulier op stadwageningen.nl.
+               Handig om te controleren of de plugin nog synchroon loopt met de server.</p>
+            <button type="button" id="stadwag-inspect-btn" class="button button-secondary">
+                Formulier inspecteren
+            </button>
+            <div id="stadwag-inspect-result" style="margin-top:12px;"></div>
+            <script>
+            document.getElementById('stadwag-inspect-btn').addEventListener('click', function() {
+                var btn = this;
+                var out = document.getElementById('stadwag-inspect-result');
+                btn.disabled = true;
+                btn.textContent = 'Ophalen…';
+                out.innerHTML = '';
+                var fd = new FormData();
+                fd.append('action', 'stadwag_inspect_form');
+                fd.append('nonce', '<?php echo esc_js( wp_create_nonce( 'stadwag_inspect' ) ); ?>');
+                fetch('<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>', { method: 'POST', body: fd })
+                    .then(function(r){ return r.json(); })
+                    .then(function(data) {
+                        btn.disabled = false;
+                        btn.textContent = 'Formulier inspecteren';
+                        if (!data.success) {
+                            out.innerHTML = '<p style="color:red;">Fout: ' + data.data.message + '</p>';
+                            return;
+                        }
+                        var rows = data.data.map(function(f) {
+                            return '<tr><td style="padding:3px 8px;font-family:monospace;">' + f.type + '</td>'
+                                 + '<td style="padding:3px 8px;font-family:monospace;font-weight:bold;">' + f.name + '</td>'
+                                 + '<td style="padding:3px 8px;font-family:monospace;color:#666;">' + f.value + '</td></tr>';
+                        });
+                        out.innerHTML = '<table style="border-collapse:collapse;background:#f6f7f7;padding:8px;">'
+                            + '<tr><th style="padding:3px 8px;text-align:left;">type</th>'
+                            + '<th style="padding:3px 8px;text-align:left;">name</th>'
+                            + '<th style="padding:3px 8px;text-align:left;">value</th></tr>'
+                            + rows.join('') + '</table>';
+                    })
+                    .catch(function(e){ btn.disabled=false; btn.textContent='Formulier inspecteren'; out.innerHTML='<p style="color:red;">Verbindingsfout.</p>'; });
+            });
+            </script>
         </div>
         <?php
     }
@@ -344,5 +387,27 @@ class Stadwag_Admin {
         $html .= '</table>';
 
         wp_send_json_success( [ 'html' => $html ] );
+    }
+
+    // -------------------------------------------------------------------------
+    // Inspecteren AJAX handler
+    // -------------------------------------------------------------------------
+
+    public function handle_inspect_ajax(): void {
+        if ( ! check_ajax_referer( 'stadwag_inspect', 'nonce', false ) ) {
+            wp_send_json_error( [ 'message' => 'Ongeldige beveiligingstoken.' ], 403 );
+        }
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => 'Onvoldoende rechten.' ], 403 );
+        }
+
+        $api    = new Stadwag_Api();
+        $result = $api->inspect_form();
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( $result );
     }
 }

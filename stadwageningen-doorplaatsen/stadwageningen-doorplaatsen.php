@@ -3,7 +3,7 @@
  * Plugin Name: Stad Wageningen Doorplaatser
  * Plugin URI:  https://www.stadwageningen.nl/tip-de-redactie
  * Description: Plaatst een WordPress bericht door naar stadwageningen.nl via de knop "Tip de redactie".
- * Version:     1.1.5
+ * Version:     1.1.6
  * Author:      Redactie
  * Text Domain: stadwag-doorplaatsen
  * License:     GPL-2.0+
@@ -11,7 +11,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'STADWAG_VERSION',     '1.1.5' );
+define( 'STADWAG_VERSION',     '1.1.6' );
 define( 'STADWAG_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'STADWAG_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'STADWAG_TARGET_BASE', 'https://www.stadwageningen.nl' );
