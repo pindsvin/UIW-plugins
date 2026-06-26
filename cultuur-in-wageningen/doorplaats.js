@@ -1,6 +1,6 @@
-/* doorplaats.js — Cultuur in Wageningen v1.4.0
- * Stuurt het formulier rechtstreeks vanuit de browser naar de CF7 REST API.
- * 'ciw' (ajaxUrl, cfApiUrl, saveNonce, postId) is beschikbaar via inline <script> in de PHP-pagina.
+/* doorplaats.js — Cultuur in Wageningen v2.0.0
+ * Stuurt het formulier via onze eigen WP AJAX-endpoint (server-side proxy).
+ * 'ciw' (ajaxUrl, submitNonce, postId) is beschikbaar via inline <script> in de PHP-pagina.
  */
 document.addEventListener('DOMContentLoaded', function () {
     var form       = document.getElementById('ciw-doorplaats-form');
@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (!form) return;
 
-    /* Verzendknop alleen actief als voorwaarden aangevinkt zijn */
     acceptance.addEventListener('change', function () {
         submitBtn.disabled = !this.checked;
     });
@@ -20,7 +19,6 @@ document.addEventListener('DOMContentLoaded', function () {
     form.addEventListener('submit', function (e) {
         e.preventDefault();
 
-        /* Client-side bestandsgrootte-check */
         if (fileInput && fileInput.files.length > 0) {
             if (fileInput.files[0].size > 1024 * 1024) {
                 showError('De afbeelding is groter dan 1 MB. Kies een kleinere afbeelding.');
@@ -33,20 +31,21 @@ document.addEventListener('DOMContentLoaded', function () {
         result.innerHTML = '';
 
         var formData = new FormData(form);
+        formData.append('action', 'cultuur_wageningen_submit');
+        formData.append('nonce',   ciw.submitNonce);
+        formData.append('post_id', ciw.postId);
 
-        fetch(ciw.cfApiUrl, {
+        fetch(ciw.ajaxUrl, {
             method: 'POST',
             body:   formData,
-            /* Geen Content-Type header — browser stelt deze in met correct boundary */
         })
         .then(function (response) {
             return response.json();
         })
-        .then(function (data) {
+        .then(function (envelope) {
             spinner.style.visibility = 'hidden';
 
-            if (data.status === 'mail_sent') {
-                /* Succes */
+            if (envelope.success) {
                 form.style.display = 'none';
                 result.innerHTML =
                     '<div class="notice notice-success inline" style="padding:12px 16px;">' +
@@ -55,38 +54,21 @@ document.addEventListener('DOMContentLoaded', function () {
                     '</p>' +
                     '<p style="margin:8px 0 0;color:#555;">Dit tabblad kan worden gesloten.</p>' +
                     '</div>';
-
-                /* Sla tijdstip op in WordPress (fire-and-forget) */
-                fetch(ciw.ajaxUrl, {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body:    new URLSearchParams({
-                        action:  'cultuur_wageningen_save_submitted',
-                        nonce:   ciw.saveNonce,
-                        post_id: ciw.postId,
-                    }).toString(),
-                });
-
             } else {
-                /* Mislukt — toon foutmelding */
-                var msg    = (data.message || '').replace(/<[^>]*>/g, '').trim();
-                var status = data.status || 'onbekend';
-
+                var d       = envelope.data || {};
+                var msg     = escHtml(d.message || 'Onbekende fout');
+                var status  = d.status  ? ' [' + escHtml(d.status) + ']' : '';
                 var invalid = '';
-                if (data.invalid_fields && data.invalid_fields.length) {
-                    var names = data.invalid_fields.map(function (f) { return f.field; });
-                    invalid = ' Ongeldige velden: ' + escHtml(names.join(', ')) + '.';
+                if (d.invalid && d.invalid.length) {
+                    invalid = '<ul style="margin:6px 0 0 16px;">' +
+                        d.invalid.map(function (s) { return '<li>' + escHtml(s) + '</li>'; }).join('') +
+                        '</ul>';
                 }
-
-                showError(
-                    'Verzending mislukt [' + escHtml(status) + ']:' +
-                    invalid +
-                    (msg ? ' ' + escHtml(msg) : '')
-                );
+                showError('Verzending mislukt' + status + ': ' + msg + invalid);
                 submitBtn.disabled = false;
             }
         })
-        .catch(function () {
+        .catch(function (err) {
             spinner.style.visibility = 'hidden';
             showError('Verbindingsfout. Controleer je internetverbinding en probeer opnieuw.');
             submitBtn.disabled = false;

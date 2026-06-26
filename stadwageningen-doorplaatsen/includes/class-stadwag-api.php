@@ -124,7 +124,7 @@ class Stadwag_Api {
             CURLOPT_HEADER         => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; WP-Doorplaatsen/1.0)',
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_TIMEOUT        => 30,
             CURLOPT_HTTPHEADER     => [ 'Cookie: ' . $tokens['cookie'] ],
         ] );
@@ -199,7 +199,7 @@ class Stadwag_Api {
             CURLOPT_HEADER         => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; WP-Doorplaatsen/1.0)',
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_TIMEOUT        => 30,
         ] );
         $response    = curl_exec( $ch );
@@ -234,15 +234,14 @@ class Stadwag_Api {
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => http_build_query( [
                 '__RequestVerificationToken' => $aft,
-                'Email'                      => $email,
-                'Password'                   => $password,
-                'RememberMe'                 => 'false',
+                'email'                      => $email,
+                'password'                   => $password,
             ] ),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HEADER         => true,
             CURLOPT_FOLLOWLOCATION => false, // 302 = succes
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; WP-Doorplaatsen/1.0)',
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_TIMEOUT        => 30,
             CURLOPT_HTTPHEADER     => array_filter( [
                 'Content-Type: application/x-www-form-urlencoded',
@@ -302,7 +301,7 @@ class Stadwag_Api {
             CURLOPT_HEADER         => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; WP-Doorplaatsen/1.0)',
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_TIMEOUT        => 30,
             CURLOPT_HTTPHEADER     => [
                 'Cookie: '   . $cookie,
@@ -383,7 +382,7 @@ class Stadwag_Api {
      *
      * @return true|WP_Error
      */
-    public function submit_post( int $post_id, int $category_id, string $remarks ): true|\WP_Error {
+    public function submit_post( int $post_id, int $category_id, string $remarks, string $caption = '', string $credit = '' ): true|\WP_Error {
 
         // Stap 1: credentials ophalen
         $creds = $this->get_credentials();
@@ -426,13 +425,8 @@ class Stadwag_Api {
 
             if ( $image_path && file_exists( $image_path ) && in_array( $image_mime, $allowed, true ) ) {
                 $image_file = new \CURLFile( $image_path, $image_mime, basename( $image_path ) );
-                $caption_0  = get_the_title( $thumb_id );
-                $credit_0   = get_post_meta( $thumb_id, '_wp_attachment_image_alt', true );
-
-                // credit[0] is verplicht — fallback naar bijschrift of standaard credit
-                if ( empty( $credit_0 ) ) {
-                    $credit_0 = $caption_0 ?: 'Uit in Wageningen';
-                }
+                $caption_0  = $caption;
+                $credit_0   = $credit;
             }
         }
 
@@ -452,7 +446,7 @@ class Stadwag_Api {
         $fields['send']                = 'Verzenden'; // submit-knop: server checkt of dit aanwezig is
 
         if ( $image_file ) {
-            $fields['file']       = $image_file;
+            $fields['formFiles']  = $image_file;
             $fields['caption[0]'] = $caption_0;
             $fields['credit[0]']  = $credit_0;
         }
@@ -468,7 +462,7 @@ class Stadwag_Api {
             CURLOPT_HEADER         => true,
             CURLOPT_FOLLOWLOCATION => false,   // 302 = succes
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; WP-Doorplaatsen/1.0)',
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_TIMEOUT        => 60,
             CURLOPT_HTTPHEADER     => [
                 'Cookie: '  . $tokens['cookie'],
@@ -486,28 +480,67 @@ class Stadwag_Api {
             return new \WP_Error( 'stadwag_curl_error', 'cURL fout (formulier versturen): ' . $curl_error );
         }
 
-        // HTTP 302 = formulier geaccepteerd (standaard ASP.NET redirect na succes)
-        if ( $http_code === 302 ) {
+        $resp_headers = substr( $response, 0, $header_size );
+        $body         = substr( $response, $header_size );
+
+        // -----------------------------------------------------------------
+        // Betrouwbare succes-detectie (v1.6.4)
+        // De echte bedankpagina toont de unieke tekst
+        // "Hartelijk dank voor uw inzending". Die staat NIET op het
+        // invulformulier en NIET in de footer.
+        //
+        // (De oude check zocht naar 'bedankt' en matchte daardoor de tekst
+        //  "Nee, bedankt" uit de push-notificatie-widget die op ELKE pagina
+        //  staat — vandaar de valse succes-meldingen.)
+        // -----------------------------------------------------------------
+        if ( stripos( $body, 'Hartelijk dank voor uw inzending' ) !== false ) {
             return true;
         }
 
-        $body = substr( $response, $header_size );
+        // Geen bevestiging: leg de volledige respons vast zodat de oorzaak
+        // zichtbaar is (ontbrekend veld, validatiefout, sessie, enz.).
+        $location = '';
+        if ( preg_match( '/^Location:\s*([^\r\n]+)/mi', $resp_headers, $loc_m ) ) {
+            $location = trim( $loc_m[1] );
+        }
 
-        // Sommige servers sturen HTTP 200 met een bedankpagina i.p.v. 302
-        $success_patterns = [ 'bedankt', 'ontvangen', 'verstuurd', 'geplaatst', 'succes', 'thank you', 'submitted' ];
-        $body_lower = strtolower( $body );
-        foreach ( $success_patterns as $pattern ) {
-            if ( str_contains( $body_lower, $pattern ) ) {
-                return true;
+        $sent_fields = [];
+        foreach ( $fields as $k => $v ) {
+            if ( $v instanceof \CURLFile ) {
+                $sent_fields[ $k ] = '[bestand: ' . basename( $v->getFilename() ) . ']';
+            } else {
+                $sent_fields[ $k ] = mb_substr( (string) $v, 0, 200 );
             }
         }
 
-        // HTTP 200 zonder succesbericht = validatiefout
+        $dump  = "=== STAD WAGENINGEN DIAGNOSE (v" . STADWAG_VERSION . ") ===\n";
+        $dump .= 'Tijd:       ' . current_time( 'mysql' ) . "\n";
+        $dump .= 'POST-URL:   ' . $form_url . "\n";
+        $dump .= 'HTTP-code:  ' . $http_code . "\n";
+        $dump .= 'Location:   ' . ( $location ?: '(geen)' ) . "\n\n";
+        $dump .= "--- Verstuurde velden ---\n";
+        foreach ( $sent_fields as $k => $v ) {
+            $dump .= $k . ' = ' . $v . "\n";
+        }
+        $dump .= "\n--- Response-headers ---\n" . trim( $resp_headers ) . "\n";
+        $dump .= "\n--- Response-body (ruwe HTML) ---\n" . $body . "\n";
+
+        $upload   = wp_upload_dir();
+        $filename = 'stadwag-diagnose.txt';
+        $filepath = trailingslashit( $upload['basedir'] ) . $filename;
+        $fileurl  = trailingslashit( $upload['baseurl'] ) . $filename;
+        @file_put_contents( $filepath, $dump );
+
         $error_hint = $this->extract_form_error( $body );
 
         return new \WP_Error(
             'stadwag_submit_failed',
-            'Formulier niet geaccepteerd (HTTP ' . $http_code . '). Servermelding: ' . ( $error_hint ?: '(geen tekst gevonden)' )
+            sprintf(
+                'Niet doorgeplaatst (HTTP %d) — de server toonde geen bevestiging. <a href="%s" target="_blank" rel="noopener">Bekijk de diagnose</a>.%s',
+                $http_code,
+                esc_url( $fileurl ),
+                $error_hint ? ' Servermelding: ' . esc_html( mb_substr( $error_hint, 0, 300 ) ) : ''
+            )
         );
     }
 

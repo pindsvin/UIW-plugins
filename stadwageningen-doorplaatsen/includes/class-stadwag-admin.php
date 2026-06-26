@@ -3,18 +3,30 @@ defined( 'ABSPATH' ) || exit;
 
 class Stadwag_Admin {
 
+    const CATEGORIES = [ 4651 => 'Lokaal', 4562 => 'Sport', 4608 => 'Zakelijk' ];
+
     public function __construct() {
         add_action( 'admin_menu',            [ $this, 'register_settings_page' ] );
-        add_action( 'admin_init',            [ $this, 'register_settings' ] );
         add_action( 'add_meta_boxes',        [ $this, 'register_meta_box' ] );
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_metabox_assets' ] );
-        add_action( 'wp_ajax_stadwag_doorplaatsen',        [ $this, 'handle_ajax' ] );
-        add_action( 'wp_ajax_stadwag_preview',             [ $this, 'handle_preview_ajax' ] );
-        add_action( 'wp_ajax_stadwag_inspect_form',        [ $this, 'handle_inspect_ajax' ] );
+        add_action( 'wp_ajax_stadwag_queue', [ $this, 'handle_queue_ajax' ] );
     }
 
     // -------------------------------------------------------------------------
-    // Settings-pagina
+    // Token
+    // -------------------------------------------------------------------------
+
+    private function get_token(): string {
+        $opts = get_option( 'stadwag_settings', [] );
+        if ( empty( $opts['bookmarklet_token'] ) ) {
+            $opts['bookmarklet_token'] = wp_generate_password( 32, false, false );
+            update_option( 'stadwag_settings', $opts );
+        }
+        return $opts['bookmarklet_token'];
+    }
+
+    // -------------------------------------------------------------------------
+    // Instellingenpagina: token + bookmarklet + uitleg
     // -------------------------------------------------------------------------
 
     public function register_settings_page(): void {
@@ -27,152 +39,98 @@ class Stadwag_Admin {
         );
     }
 
-    public function register_settings(): void {
-        register_setting(
-            'stadwag_settings_group',
-            'stadwag_settings',
-            [ 'sanitize_callback' => [ $this, 'sanitize_settings' ] ]
-        );
-
-        add_settings_section(
-            'stadwag_main_section',
-            'Inloggegevens Stad Wageningen',
-            static function () {
-                echo '<p>Vul de inloggegevens in van uw account op stadwageningen.nl.</p>';
-            },
-            'stadwag-settings'
-        );
-
-        add_settings_field(
-            'stadwag_email',
-            'E-mailadres',
-            [ $this, 'render_email_field' ],
-            'stadwag-settings',
-            'stadwag_main_section'
-        );
-
-        add_settings_field(
-            'stadwag_password',
-            'Wachtwoord',
-            [ $this, 'render_password_field' ],
-            'stadwag-settings',
-            'stadwag_main_section'
-        );
-    }
-
-    public function render_email_field(): void {
-        $opts  = get_option( 'stadwag_settings', [] );
-        $email = esc_attr( $opts['email'] ?? '' );
-        echo '<input type="email" name="stadwag_settings[email]" value="' . $email . '" class="regular-text" autocomplete="username">';
-    }
-
-    public function render_password_field(): void {
-        echo '<input type="password" name="stadwag_settings[password]" value="" class="regular-text" autocomplete="new-password">';
-        echo '<p class="description">Laat leeg om het huidige wachtwoord te bewaren.</p>';
-    }
-
     public function render_settings_page(): void {
         if ( ! current_user_can( 'manage_options' ) ) {
             return;
         }
+
+        // Nieuw token genereren
+        if ( isset( $_POST['stadwag_regen_token'] ) && check_admin_referer( 'stadwag_regen' ) ) {
+            $opts = get_option( 'stadwag_settings', [] );
+            $opts['bookmarklet_token'] = wp_generate_password( 32, false, false );
+            update_option( 'stadwag_settings', $opts );
+            echo '<div class="notice notice-success"><p>Nieuw token aangemaakt. Sleep de bookmarklet hieronder opnieuw naar je bladwijzerbalk (de oude werkt niet meer).</p></div>';
+        }
+
+        $token         = $this->get_token();
+        $data_endpoint = rest_url( 'stadwag/v1/queued' ) . '?token=' . rawurlencode( $token );
+        $img_endpoint  = rest_url( 'stadwag/v1/queued-image' ) . '?token=' . rawurlencode( $token );
+        $bookmarklet   = $this->build_bookmarklet( $data_endpoint, $img_endpoint );
+        $form_url      = STADWAG_TARGET_BASE . STADWAG_FORM_PATH;
         ?>
         <div class="wrap">
             <h1>Stad Wageningen Doorplaatsen</h1>
-            <form method="post" action="options.php">
-                <?php
-                settings_fields( 'stadwag_settings_group' );
-                do_settings_sections( 'stadwag-settings' );
-                submit_button( 'Instellingen opslaan' );
-                ?>
-            </form>
+
+            <p>Deze plugin plaatst je WordPress-bericht door naar Stad Wageningen via je
+               <strong>eigen browser</strong> — niet via de WordPress-server. Daardoor ziet de
+               inzending er voor Stad Wageningen identiek uit aan een gewone bezoeker, en loop je
+               niet tegen firewall- of spamblokkades aan.</p>
+
+            <h2>Hoe werkt het?</h2>
+            <ol style="max-width:760px;line-height:1.7;">
+                <li>Open in WordPress het bericht dat je wilt doorplaatsen.</li>
+                <li>Kies in het blok <strong>Stad Wageningen</strong> (rechts) de categorie en vul
+                    eventueel onderschrift + fotocredit in.</li>
+                <li>Klik op <strong>Klaarzetten voor Stad Wageningen</strong>.</li>
+                <li>Ga naar <a href="<?php echo esc_url( $form_url ); ?>" target="_blank" rel="noopener"><?php echo esc_html( $form_url ); ?></a>
+                    (zorg dat je daar bent ingelogd).</li>
+                <li>Klik op je bookmarklet <strong>«SW invullen»</strong> — titel, tekst en categorie
+                    worden automatisch ingevuld.</li>
+                <li>Upload zelf de foto, controleer alles en klik op <strong>Verzenden</strong>.</li>
+            </ol>
 
             <hr>
-            <h2>Formulier inspecteren</h2>
-            <p>Haal de huidige veldnamen en waarden op van het formulier op stadwageningen.nl.
-               Handig om te controleren of de plugin nog synchroon loopt met de server.</p>
-            <button type="button" id="stadwag-inspect-btn" class="button button-secondary">
-                Formulier inspecteren
-            </button>
-            <div id="stadwag-inspect-result" style="margin-top:12px;"></div>
-            <script>
-            document.getElementById('stadwag-inspect-btn').addEventListener('click', function() {
-                var btn = this;
-                var out = document.getElementById('stadwag-inspect-result');
-                btn.disabled = true;
-                btn.textContent = 'Ophalen…';
-                out.innerHTML = '';
-                var fd = new FormData();
-                fd.append('action', 'stadwag_inspect_form');
-                fd.append('nonce', '<?php echo esc_js( wp_create_nonce( 'stadwag_inspect' ) ); ?>');
-                fetch('<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>', { method: 'POST', body: fd })
-                    .then(function(r){ return r.json(); })
-                    .then(function(data) {
-                        btn.disabled = false;
-                        btn.textContent = 'Formulier inspecteren';
-                        if (!data.success) {
-                            out.innerHTML = '<p style="color:red;">Fout: ' + data.data.message + '</p>';
-                            return;
-                        }
-                        var rows = data.data.map(function(f) {
-                            return '<tr><td style="padding:3px 8px;font-family:monospace;">' + f.type + '</td>'
-                                 + '<td style="padding:3px 8px;font-family:monospace;font-weight:bold;">' + f.name + '</td>'
-                                 + '<td style="padding:3px 8px;font-family:monospace;color:#666;">' + f.value + '</td></tr>';
-                        });
-                        out.innerHTML = '<table style="border-collapse:collapse;background:#f6f7f7;padding:8px;">'
-                            + '<tr><th style="padding:3px 8px;text-align:left;">type</th>'
-                            + '<th style="padding:3px 8px;text-align:left;">name</th>'
-                            + '<th style="padding:3px 8px;text-align:left;">value</th></tr>'
-                            + rows.join('') + '</table>';
-                    })
-                    .catch(function(e){ btn.disabled=false; btn.textContent='Formulier inspecteren'; out.innerHTML='<p style="color:red;">Verbindingsfout.</p>'; });
-            });
-            </script>
+
+            <h2>Eenmalig instellen: de bookmarklet</h2>
+            <p>Sleep onderstaande knop naar je bladwijzerbalk (in Vivaldi/Chrome: bladwijzerbalk
+               zichtbaar maken met <code>Ctrl/Cmd&nbsp;+&nbsp;Shift&nbsp;+&nbsp;B</code>, daarna de knop
+               erheen slepen):</p>
+
+            <p style="margin:16px 0;">
+                <a href="<?php echo esc_attr( $bookmarklet ); ?>"
+                   onclick="alert('Sleep deze knop naar je bladwijzerbalk — niet aanklikken.'); return false;"
+                   style="display:inline-block;padding:10px 18px;background:#2c2c2c;color:#fff;
+                          border-radius:6px;text-decoration:none;font-weight:600;cursor:grab;">
+                    &laquo; SW invullen &raquo;
+                </a>
+            </p>
+            <p class="description">Lukt slepen niet? Maak handmatig een bladwijzer aan en plak de
+               onderstaande code als URL/adres:</p>
+            <textarea readonly rows="4" style="width:100%;max-width:760px;font-family:monospace;font-size:11px;"
+                      onclick="this.select();"><?php echo esc_textarea( $bookmarklet ); ?></textarea>
+
+            <hr>
+
+            <h2>Token</h2>
+            <p class="description">De bookmarklet gebruikt dit geheime token om de berichtdata bij
+               WordPress op te halen. Genereer een nieuw token als je vermoedt dat het is uitgelekt
+               (daarna moet je de bookmarklet opnieuw instellen).</p>
+            <p><code style="user-select:all;"><?php echo esc_html( $token ); ?></code></p>
+            <form method="post">
+                <?php wp_nonce_field( 'stadwag_regen' ); ?>
+                <button type="submit" name="stadwag_regen_token" value="1" class="button button-secondary"
+                        onclick="return confirm('Nieuw token aanmaken? De huidige bookmarklet werkt daarna niet meer.');">
+                    Nieuw token genereren
+                </button>
+            </form>
         </div>
         <?php
     }
 
-    public function sanitize_settings( array $input ): array {
-        $api     = new Stadwag_Api();
-        $current = get_option( 'stadwag_settings', [] );
+    /**
+     * Bouwt de bookmarklet-code (een javascript:-URL).
+     * NOWDOC zodat PHP de JS niet interpreteert; alleen het endpoint wordt vervangen.
+     */
+    private function build_bookmarklet( string $data_endpoint, string $img_endpoint ): string {
+        $js = <<<'JS'
+javascript:(function(){var D='__ENDPOINT__',IMG='__IMG__';fetch(D).then(function(r){return r.json();}).then(function(d){if(!d||!d.title){alert('Stad Wageningen: '+((d&&(d.error||d.message))||'geen gegevens gevonden'));return;}function fire(e,t){e.dispatchEvent(new Event(t,{bubbles:true}));}function setVal(el,v){if(!el)return;var p=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var s=Object.getOwnPropertyDescriptor(p,'value').set;s.call(el,v==null?'':v);fire(el,'input');fire(el,'change');}function typeCE(ce,v){if(!ce)return;ce.focus();try{document.execCommand('selectAll',false,null);document.execCommand('insertText',false,v);}catch(err){ce.textContent=v;fire(ce,'input');}}var cat=document.getElementById('CategoryId');if(cat){cat.value=d.category_id;fire(cat,'change');}var ces=[].slice.call(document.querySelectorAll('[contenteditable="true"],[contenteditable=""]'));typeCE(ces[0],d.title);typeCE(ces[1],d.text);setVal(document.getElementById('title'),d.title);setVal(document.getElementById('text'),d.text);function fillCC(){setVal(document.querySelector("[name='caption[0]']"),d.caption);setVal(document.querySelector("[name='credit[0]']"),d.credit);}if(d.image_name){fetch(IMG).then(function(r){return r.ok?r.blob():null;}).then(function(b){var m;if(b){try{var f=new File([b],d.image_name,{type:b.type||'image/jpeg'});var inp=document.querySelector('input[type=file]');if(inp){var dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;fire(inp,'change');}setTimeout(fillCC,800);m='✓ Alles ingevuld, inclusief de foto. Controleer en klik op Verzenden.';}catch(e){m='✓ Tekst ingevuld. Upload de foto zelf: '+d.image_name;}}else{m='✓ Tekst ingevuld. Upload de foto zelf: '+d.image_name;}if(d.credit){m+='\nFotocredit: '+d.credit;}if(d.caption){m+='\nOnderschrift: '+d.caption;}alert(m);}).catch(function(){alert('✓ Tekst ingevuld. Upload de foto zelf: '+d.image_name);});}else{fillCC();alert('✓ Kop, tekst en categorie ingevuld. Geen foto ingesteld.');}}).catch(function(e){alert('Kon de gegevens niet ophalen uit WordPress.\n'+e);});})();
+JS;
 
-        $out          = [];
-        $out['email'] = sanitize_email( $input['email'] ?? '' );
-
-        $new_pass = $input['password'] ?? '';
-        if ( $new_pass !== '' ) {
-            $out['pass_enc'] = $api->encrypt_public( $new_pass );
-        } else {
-            // Bewaar bestaand versleuteld wachtwoord
-            $out['pass_enc'] = $current['pass_enc'] ?? '';
-        }
-
-        // Verbindingstest: alleen als er een nieuw wachtwoord ingevoerd is
-        // (plaintext is dan nog beschikbaar — na encryptie niet meer)
-        if ( ! empty( $out['email'] ) && $new_pass !== '' ) {
-            $result = $api->test_credentials( $out['email'], $new_pass );
-
-            if ( is_wp_error( $result ) ) {
-                add_settings_error(
-                    'stadwag_settings',
-                    'stadwag_login_failed',
-                    '⚠️ Inloggen bij Stad Wageningen mislukt: ' . esc_html( $result->get_error_message() ),
-                    'error'
-                );
-            } else {
-                add_settings_error(
-                    'stadwag_settings',
-                    'stadwag_login_ok',
-                    '✅ Verbinding met Stad Wageningen werkt — inloggen gelukt.',
-                    'updated'
-                );
-            }
-        }
-
-        return $out;
+        return str_replace( [ '__ENDPOINT__', '__IMG__' ], [ $data_endpoint, $img_endpoint ], $js );
     }
 
     // -------------------------------------------------------------------------
-    // Meta box
+    // Meta box op de bericht-editor
     // -------------------------------------------------------------------------
 
     public function register_meta_box(): void {
@@ -189,69 +147,55 @@ class Stadwag_Admin {
     }
 
     public function render_meta_box( \WP_Post $post ): void {
-        wp_nonce_field( 'stadwag_doorplaatsen_' . $post->ID, 'stadwag_nonce' );
+        wp_nonce_field( 'stadwag_queue', 'stadwag_nonce' );
 
-        // Statusbadge
-        $forwarded_at = get_post_meta( $post->ID, '_stadwag_forwarded_at', true );
-        if ( $forwarded_at ) {
-            $date_format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
-            $date        = date_i18n( $date_format, strtotime( $forwarded_at ) );
-            echo '<p class="stadwag-forwarded-badge" style="color:#46b450;font-weight:600;">';
-            echo '&#10003; Doorgeplaatst op ' . esc_html( $date );
-            echo '</p>';
-        }
+        $queued    = get_option( 'stadwag_queued', [] );
+        $is_queued = ! empty( $queued['post_id'] ) && (int) $queued['post_id'] === $post->ID;
 
-        // Categoriekeuze
-        $saved_cat  = (int) ( get_post_meta( $post->ID, '_stadwag_last_category', true ) ?: 4651 );
-        $categories = [ 4651 => 'Lokaal', 4562 => 'Sport', 4608 => 'Zakelijk' ];
+        $saved_cat     = (int) ( get_post_meta( $post->ID, '_stadwag_last_category', true ) ?: 4651 );
+        $saved_caption = get_post_meta( $post->ID, '_stadwag_last_caption', true );
+        $saved_credit  = get_post_meta( $post->ID, '_stadwag_last_credit', true );
+        $thumb_id      = get_post_thumbnail_id( $post->ID );
+
+        // Status: dit bericht klaargezet?
+        echo '<p id="stadwag-queued-badge" style="color:#46b450;font-weight:600;' . ( $is_queued ? '' : 'display:none;' ) . '">';
+        echo '&#10003; Klaargezet voor Stad Wageningen';
+        echo '</p>';
+
+        // Categorie
         echo '<p>';
         echo '<label for="stadwag_category"><strong>Categorie</strong></label><br>';
         echo '<select name="stadwag_category" id="stadwag_category" style="width:100%;margin-top:4px;">';
-        foreach ( $categories as $id => $label ) {
-            echo '<option value="' . esc_attr( $id ) . '"' . selected( $saved_cat, $id, false ) . '>'
-                . esc_html( $label ) . '</option>';
+        foreach ( self::CATEGORIES as $id => $label ) {
+            echo '<option value="' . esc_attr( $id ) . '"' . selected( $saved_cat, $id, false ) . '>' . esc_html( $label ) . '</option>';
         }
         echo '</select>';
         echo '</p>';
 
-        // Opmerking
-        $saved_remarks = get_post_meta( $post->ID, '_stadwag_last_remarks', true );
+        // Onderschrift + fotocredit (alleen relevant bij een afbeelding)
+        if ( $thumb_id ) {
+            echo '<p style="color:#666;font-size:12px;">&#128247; Uitgelichte afbeelding aanwezig — vul onderschrift en fotocredit in (die toon je straks bij de upload).</p>';
+        }
         echo '<p>';
-        echo '<label for="stadwag_remarks"><strong>Opmerking voor redactie</strong> <span style="font-weight:normal">(optioneel)</span></label><br>';
-        echo '<textarea name="stadwag_remarks" id="stadwag_remarks" rows="3" maxlength="250" '
-            . 'style="width:100%;margin-top:4px;" placeholder="Max. 250 tekens">'
-            . esc_textarea( $saved_remarks )
-            . '</textarea>';
+        echo '<label for="stadwag_caption"><strong>Onderschrift afbeelding</strong></label><br>';
+        echo '<input type="text" name="stadwag_caption" id="stadwag_caption" maxlength="255" '
+            . 'style="width:100%;margin-top:4px;" value="' . esc_attr( $saved_caption ) . '" placeholder="Optioneel">';
+        echo '</p>';
+        echo '<p>';
+        echo '<label for="stadwag_credit"><strong>Fotocredit</strong></label><br>';
+        echo '<input type="text" name="stadwag_credit" id="stadwag_credit" maxlength="255" '
+            . 'style="width:100%;margin-top:4px;" value="' . esc_attr( $saved_credit ) . '" placeholder="Bijv. naam fotograaf">';
         echo '</p>';
 
-        // Afbeelding-info
-        $thumb_id = get_post_thumbnail_id( $post->ID );
-        if ( $thumb_id ) {
-            echo '<p style="color:#666;font-size:12px;">&#128247; Uitgelichte afbeelding wordt meegestuurd.</p>';
-        } else {
-            echo '<p style="color:#999;font-size:12px;">Geen uitgelichte afbeelding ingesteld.</p>';
-        }
-
-        // Stap 1: voorvertoning ophalen
+        // Klaarzet-knop
         echo '<p>';
-        echo '<button type="button" id="stadwag-preview-btn" class="button button-primary" style="width:100%;">';
-        echo 'Controleer &amp; doorplaatsen';
+        echo '<button type="button" id="stadwag-queue-btn" class="button button-primary" style="width:100%;">';
+        echo 'Klaarzetten voor Stad Wageningen';
         echo '</button>';
         echo '<span id="stadwag-spinner" class="spinner" style="float:none;margin:4px 0 0 5px;visibility:hidden;"></span>';
         echo '</p>';
 
-        // Stap 2: voorvertoning + bevestigingsknoppen (verborgen tot stap 1)
-        echo '<div id="stadwag-preview" style="display:none;border:1px solid #ccd0d4;border-radius:3px;padding:10px;margin-top:8px;background:#f8f8f8;">';
-        echo '<p style="margin:0 0 8px;font-weight:600;font-size:12px;text-transform:uppercase;color:#666;">Voorvertoning</p>';
-        echo '<div id="stadwag-preview-content"></div>';
-        echo '<p style="margin:12px 0 4px;">';
-        echo '<button type="button" id="stadwag-confirm-btn" class="button button-primary">Indienen bij Stad Wageningen</button> ';
-        echo '<button type="button" id="stadwag-cancel-btn" class="button">Annuleren</button>';
-        echo '</p>';
-        echo '</div>';
-
         echo '<div id="stadwag-feedback" style="margin-top:8px;"></div>';
-
         echo '<input type="hidden" id="stadwag_post_id" value="' . esc_attr( $post->ID ) . '">';
     }
 
@@ -271,143 +215,46 @@ class Stadwag_Admin {
             true
         );
         wp_localize_script( 'stadwag-metabox', 'stadwagAjax', [
-            'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-            'i18n'    => [
-                'loading' => 'Voorvertoning ophalen…',
-                'sending' => 'Bezig met indienen…',
-                'success' => 'Bericht succesvol doorgeplaatst!',
-                'error'   => 'Fout: ',
-            ],
+            'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+            'settingsUrl' => admin_url( 'options-general.php?page=stadwag-settings' ),
         ] );
     }
 
     // -------------------------------------------------------------------------
-    // AJAX handler
+    // AJAX: bericht klaarzetten
     // -------------------------------------------------------------------------
 
-    public function handle_ajax(): void {
+    public function handle_queue_ajax(): void {
         $post_id = (int) ( $_POST['post_id'] ?? 0 );
 
-        // Nonce-verificatie
-        if ( ! $post_id || ! check_ajax_referer( 'stadwag_doorplaatsen_' . $post_id, 'nonce', false ) ) {
+        if ( ! $post_id || ! check_ajax_referer( 'stadwag_queue', 'nonce', false ) ) {
             wp_send_json_error( [ 'message' => 'Ongeldige beveiligingstoken.' ], 403 );
         }
-
-        // Rechtencheck
         if ( ! current_user_can( 'edit_post', $post_id ) ) {
             wp_send_json_error( [ 'message' => 'Onvoldoende rechten.' ], 403 );
         }
 
-        // Invoer saniteren
         $category_id = (int) ( $_POST['category_id'] ?? 4651 );
-        if ( ! in_array( $category_id, [ 4651, 4562, 4608 ], true ) ) {
+        if ( ! array_key_exists( $category_id, self::CATEGORIES ) ) {
             $category_id = 4651;
         }
-        $remarks = sanitize_textarea_field( $_POST['remarks'] ?? '' );
+        $caption = sanitize_text_field( $_POST['caption'] ?? '' );
+        $credit  = sanitize_text_field( $_POST['credit']  ?? '' );
 
-        // UI-keuzes bewaren (ook bij mislukken, zodat ze beschikbaar blijven)
         update_post_meta( $post_id, '_stadwag_last_category', $category_id );
-        update_post_meta( $post_id, '_stadwag_last_remarks',  $remarks );
+        update_post_meta( $post_id, '_stadwag_last_caption',  $caption );
+        update_post_meta( $post_id, '_stadwag_last_credit',   $credit );
 
-        // Bericht doorplaatsen
-        $api    = new Stadwag_Api();
-        $result = $api->submit_post( $post_id, $category_id, $remarks );
-
-        if ( is_wp_error( $result ) ) {
-            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
-        }
-
-        // Tijdstip vastleggen
-        $now = current_time( 'mysql' );
-        update_post_meta( $post_id, '_stadwag_forwarded_at', $now );
+        update_option( 'stadwag_queued', [
+            'post_id'     => $post_id,
+            'category_id' => $category_id,
+            'caption'     => $caption,
+            'credit'      => $credit,
+            'time'        => time(),
+        ] );
 
         wp_send_json_success( [
-            'message'      => 'Bericht succesvol doorgeplaatst!',
-            'forwarded_at' => $now,
+            'message' => 'Klaargezet! Ga naar de Stad Wageningen-pagina en klik op je bookmarklet «SW invullen».',
         ] );
-    }
-
-    // -------------------------------------------------------------------------
-    // Preview AJAX handler
-    // -------------------------------------------------------------------------
-
-    public function handle_preview_ajax(): void {
-        $post_id = (int) ( $_POST['post_id'] ?? 0 );
-
-        if ( ! $post_id || ! check_ajax_referer( 'stadwag_doorplaatsen_' . $post_id, 'nonce', false ) ) {
-            wp_send_json_error( [ 'message' => 'Ongeldige beveiligingstoken.' ], 403 );
-        }
-        if ( ! current_user_can( 'edit_post', $post_id ) ) {
-            wp_send_json_error( [ 'message' => 'Onvoldoende rechten.' ], 403 );
-        }
-
-        $post = get_post( $post_id );
-
-        $category_id = (int) ( $_POST['category_id'] ?? 4651 );
-        if ( ! in_array( $category_id, [ 4651, 4562, 4608 ], true ) ) {
-            $category_id = 4651;
-        }
-        $categories  = [ 4651 => 'Lokaal', 4562 => 'Sport', 4608 => 'Zakelijk' ];
-        $remarks     = sanitize_textarea_field( $_POST['remarks'] ?? '' );
-
-        $title   = mb_substr( wp_strip_all_tags( $post->post_title ), 0, 640 );
-        $content = wp_strip_all_tags( strip_shortcodes( $post->post_content ) );
-        $content = preg_replace( '/https?:\/\/\S+/u', '', $content );
-        $content = preg_replace( '/[ \t]+/', ' ', $content );
-        $content = trim( $content );
-        $excerpt = mb_substr( $content, 0, 300 ) . ( mb_strlen( $content ) > 300 ? '…' : '' );
-
-        // Afbeelding
-        $thumb_id   = get_post_thumbnail_id( $post_id );
-        $thumb_html = '';
-        if ( $thumb_id ) {
-            $thumb_src  = wp_get_attachment_image_url( $thumb_id, 'thumbnail' );
-            $thumb_name = basename( get_attached_file( $thumb_id ) );
-            if ( $thumb_src ) {
-                $thumb_html = '<img src="' . esc_url( $thumb_src ) . '" style="max-width:100%;height:auto;margin:6px 0;" alt="">';
-                $thumb_html .= '<br><small>' . esc_html( $thumb_name ) . '</small>';
-            }
-        } else {
-            $thumb_html = '<em style="color:#999;">Geen uitgelichte afbeelding</em>';
-        }
-
-        $html  = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
-        $html .= '<tr><td style="padding:4px 0;color:#666;width:70px;vertical-align:top;">Koptekst</td>'
-               . '<td style="padding:4px 0;font-weight:600;">' . esc_html( $title ) . '</td></tr>';
-        $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Categorie</td>'
-               . '<td style="padding:4px 0;">' . esc_html( $categories[ $category_id ] ) . '</td></tr>';
-        $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Tekst</td>'
-               . '<td style="padding:4px 0;">' . esc_html( $excerpt ) . '</td></tr>';
-        if ( $remarks ) {
-            $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Opmerking</td>'
-                   . '<td style="padding:4px 0;">' . esc_html( $remarks ) . '</td></tr>';
-        }
-        $html .= '<tr><td style="padding:4px 0;color:#666;vertical-align:top;">Afbeelding</td>'
-               . '<td style="padding:4px 0;">' . $thumb_html . '</td></tr>';
-        $html .= '</table>';
-
-        wp_send_json_success( [ 'html' => $html ] );
-    }
-
-    // -------------------------------------------------------------------------
-    // Inspecteren AJAX handler
-    // -------------------------------------------------------------------------
-
-    public function handle_inspect_ajax(): void {
-        if ( ! check_ajax_referer( 'stadwag_inspect', 'nonce', false ) ) {
-            wp_send_json_error( [ 'message' => 'Ongeldige beveiligingstoken.' ], 403 );
-        }
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( [ 'message' => 'Onvoldoende rechten.' ], 403 );
-        }
-
-        $api    = new Stadwag_Api();
-        $result = $api->inspect_form();
-
-        if ( is_wp_error( $result ) ) {
-            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
-        }
-
-        wp_send_json_success( $result );
     }
 }
