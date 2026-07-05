@@ -13,11 +13,12 @@ Branch: `master`
 
 Zet een WordPress-bericht klaar en vult er via een **bookmarklet** het tip-de-redactie-formulier van stadwageningen.nl mee in.
 
-**Werking (v2.0.0 — browser-side via bookmarklet):**
+**Werking (v2.2.0 — browser-side via bookmarklet met auto-submit):**
 - Blok "Stad Wageningen" in de zijbalk van de bericht-editor: categorie, onderschrift, fotocredit + knop **Klaarzetten voor Stad Wageningen**
 - Klaarzetten slaat het bericht op als "queued" (post_id + categorie + onderschrift + credit) in de optie `stadwag_queued`
 - Op stadwageningen.nl/tip-de-redactie klikt de gebruiker een **bookmarklet** die de klaargezette data ophaalt via een REST-endpoint en de formuliervelden invult (titel, tekst, categorie, onderschrift, fotocredit)
 - **De foto wordt automatisch geüpload** (v2.1.0): de bookmarklet haalt de afbeelding op via een tweede REST-endpoint en plaatst die met `DataTransfer` in het file-input van het formulier
+- **Automatisch verzenden** (v2.2.0): na het invullen + foto-upload vinkt de bookmarklet de voorwaarden-checkbox (`okGeneralConditions`) aan en roept `pubbleWebsiteForms.submit()` aan. Er verschijnt een `confirm()` dialoog ("Verzenden naar Stad Wageningen?") — bij OK wordt direct verzonden, bij Annuleren kan de gebruiker handmatig controleren en verzenden
 - De velden `title`/`text` zijn tekst-editors (`contenteditable` DIVs vóór de verborgen textareas); de bookmarklet "typt" erin via `document.execCommand('insertText')` — direct de textarea zetten werkt niet (editor overschrijft die)
 - De daadwerkelijke verzending gebeurt in de browser van de gebruiker, op de pagina van Stad Wageningen, met diens eigen sessie + antiforgery-token → geen WAF/firewall-blokkade
 - Titel/tekst worden opgeschoond (HTML + losse URLs gestript, lege regels tussen alinea's genormaliseerd)
@@ -29,7 +30,7 @@ Zet een WordPress-bericht klaar en vult er via een **bookmarklet** het tip-de-re
 - `GET /wp-json/stadwag/v1/queued-image?token=XXX` — de uitgelichte afbeelding als ruwe bytes (omzeilt JSON-serialisatie: zet headers + `readfile` + `exit`)
 
 **Instellingen:** WordPress → Instellingen → Stad Wageningen (bookmarklet installeren + token)  
-**Versie:** 2.1.1
+**Versie:** 2.2.0
 
 **Bestanden:**
 - `stadwageningen-doorplaatsen.php` — plugin header, constanten, laadt rest + admin
@@ -43,7 +44,7 @@ Zet een WordPress-bericht klaar en vult er via een **bookmarklet** het tip-de-re
 - 4562 = Sport
 - 4608 = Zakelijk
 
-**Formuliervelden op tip-de-redactie:** `title` (textarea), `text` (textarea), `CategoryId` (select), `caption[0]`, `credit[0]`, file-upload (handmatig)
+**Formuliervelden op tip-de-redactie:** `title` (textarea + contenteditable), `text` (textarea + contenteditable), `CategoryId` (select), `okGeneralConditions` (checkbox, verplicht), `hp_website` (honeypot, moet leeg blijven), `send` (button, roept `pubbleWebsiteForms.submit()` aan), `caption[0]`, `credit[0]`, file-upload (automatisch via DataTransfer)
 
 ---
 
