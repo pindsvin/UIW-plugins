@@ -11,32 +11,34 @@ Branch: `master`
 
 ### 1. Stad Wageningen Doorplaatser (`stadwageningen-doorplaatsen/`)
 
-Zet een WordPress-bericht klaar en vult er via een **bookmarklet** het tip-de-redactie-formulier van stadwageningen.nl mee in.
+Zet een WordPress-bericht klaar en vult er via een **Tampermonkey-userscript** het tip-de-redactie-formulier van stadwageningen.nl mee in, inclusief automatisch verzenden.
 
-**Werking (v2.2.0 — browser-side via bookmarklet met auto-submit):**
-- Blok "Stad Wageningen" in de zijbalk van de bericht-editor: categorie, onderschrift, fotocredit + knop **Klaarzetten voor Stad Wageningen**
-- Klaarzetten slaat het bericht op als "queued" (post_id + categorie + onderschrift + credit) in de optie `stadwag_queued`
-- Op stadwageningen.nl/tip-de-redactie klikt de gebruiker een **bookmarklet** die de klaargezette data ophaalt via een REST-endpoint en de formuliervelden invult (titel, tekst, categorie, onderschrift, fotocredit)
-- **De foto wordt automatisch geüpload** (v2.1.0): de bookmarklet haalt de afbeelding op via een tweede REST-endpoint en plaatst die met `DataTransfer` in het file-input van het formulier
-- **Automatisch verzenden** (v2.2.0): na het invullen + foto-upload vinkt de bookmarklet de voorwaarden-checkbox (`okGeneralConditions`) aan en roept `pubbleWebsiteForms.submit()` aan. Er verschijnt een `confirm()` dialoog ("Verzenden naar Stad Wageningen?") — bij OK wordt direct verzonden, bij Annuleren kan de gebruiker handmatig controleren en verzenden
-- De velden `title`/`text` zijn tekst-editors (`contenteditable` DIVs vóór de verborgen textareas); de bookmarklet "typt" erin via `document.execCommand('insertText')` — direct de textarea zetten werkt niet (editor overschrijft die)
+**Werking (v3.0.0 — userscript met auto-submit):**
+- Blok "Stad Wageningen" in de zijbalk van de bericht-editor: categorie, onderschrift, fotocredit + knop **Doorplaatsen naar Stad Wageningen**
+- Klikken op de knop slaat het bericht op als "queued" (post_id + categorie + onderschrift + credit) in de optie `stadwag_queued` en opent automatisch stadwageningen.nl/tip-de-redactie in een nieuw tabblad
+- Het **userscript** (Tampermonkey) draait automatisch op page-load van de tip-de-redactie-pagina: het haalt de klaargezette data op via een REST-endpoint en vult de formuliervelden in (titel, tekst, categorie, onderschrift, fotocredit)
+- **De foto wordt automatisch geüpload**: het userscript haalt de afbeelding op via een tweede REST-endpoint en plaatst die met `DataTransfer` in het file-input van het formulier
+- **Automatisch verzenden**: na het invullen + foto-upload vinkt het userscript de voorwaarden-checkbox (`okGeneralConditions`) aan en roept `pubbleWebsiteForms.submit()` aan. Er verschijnt een `confirm()` dialoog ("Verzenden naar Stad Wageningen?") — bij OK wordt direct verzonden, bij Annuleren kan de gebruiker handmatig controleren en verzenden
+- Als er géén bericht klaargezet is (REST geeft 404), doet het userscript niets — de gebruiker kan het formulier normaal handmatig gebruiken
+- De velden `title`/`text` zijn tekst-editors (`contenteditable` DIVs vóór de verborgen textareas); het userscript "typt" erin via `document.execCommand('insertText')` — direct de textarea zetten werkt niet (editor overschrijft die)
 - De daadwerkelijke verzending gebeurt in de browser van de gebruiker, op de pagina van Stad Wageningen, met diens eigen sessie + antiforgery-token → geen WAF/firewall-blokkade
 - Titel/tekst worden opgeschoond (HTML + losse URLs gestript, lege regels tussen alinea's genormaliseerd)
 
-**Waarom v2.0.0:** de oude server-side aanpak (v1.x) logde via cURL in op stadwageningen.nl. Dat werd door bot-/firewallbescherming geblokkeerd (HTTP 403 op login- en formulierpagina). De bookmarklet-aanpak omzeilt dit door alles vanuit de echte browser te doen.
+**Waarom v3.0.0:** de bookmarklet-aanpak (v2.x) werkte, maar vereiste handmatig navigeren naar de tip-de-redactie-pagina en klikken op de bookmarklet. Het userscript draait automatisch op page-load, waardoor de flow wordt: knop klikken in WP → pagina opent → alles wordt ingevuld → bevestigen → verzonden. Eén klik minder.
 
-**REST-endpoints:** (beide token-beveiligd, WP's eigen REST-CORS echoot de Origin)
+**REST-endpoints:** (alle token-beveiligd, WP's eigen REST-CORS echoot de Origin)
 - `GET /wp-json/stadwag/v1/queued?token=XXX` — klaargezette berichtdata als JSON
 - `GET /wp-json/stadwag/v1/queued-image?token=XXX` — de uitgelichte afbeelding als ruwe bytes (omzeilt JSON-serialisatie: zet headers + `readfile` + `exit`)
+- `GET /wp-json/stadwag/v1/userscript` — serveert het Tampermonkey-userscript met token ingebed (alleen voor ingelogde WP-admins)
 
-**Instellingen:** WordPress → Instellingen → Stad Wageningen (bookmarklet installeren + token)  
-**Versie:** 2.2.0
+**Instellingen:** WordPress → Instellingen → Stad Wageningen (userscript installeren + token)  
+**Versie:** 3.0.0
 
 **Bestanden:**
 - `stadwageningen-doorplaatsen.php` — plugin header, constanten, laadt rest + admin
-- `includes/class-stadwag-rest.php` — REST-endpoint dat de queued data teruggeeft
-- `includes/class-stadwag-admin.php` — metabox (klaarzetten) + instellingenpagina (bookmarklet/token) + AJAX
-- `assets/js/metabox.js` — jQuery (klaarzet-knop → AJAX)
+- `includes/class-stadwag-rest.php` — REST-endpoints: queued data, queued image, userscript
+- `includes/class-stadwag-admin.php` — metabox (doorplaats-knop) + instellingenpagina (userscript/token) + AJAX
+- `assets/js/metabox.js` — jQuery (doorplaats-knop → AJAX → opent stadwageningen-pagina in nieuw tabblad)
 - `includes/class-stadwag-api.php` — **legacy, niet meer geladen** (oude server-side login/submit)
 
 **Categorieën stadwageningen.nl:**

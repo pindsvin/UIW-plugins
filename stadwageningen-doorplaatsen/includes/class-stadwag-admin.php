@@ -49,14 +49,12 @@ class Stadwag_Admin {
             $opts = get_option( 'stadwag_settings', [] );
             $opts['bookmarklet_token'] = wp_generate_password( 32, false, false );
             update_option( 'stadwag_settings', $opts );
-            echo '<div class="notice notice-success"><p>Nieuw token aangemaakt. Sleep de bookmarklet hieronder opnieuw naar je bladwijzerbalk (de oude werkt niet meer).</p></div>';
+            echo '<div class="notice notice-success"><p>Nieuw token aangemaakt. Installeer het userscript hieronder opnieuw (het oude werkt niet meer).</p></div>';
         }
 
-        $token         = $this->get_token();
-        $data_endpoint = rest_url( 'stadwag/v1/queued' ) . '?token=' . rawurlencode( $token );
-        $img_endpoint  = rest_url( 'stadwag/v1/queued-image' ) . '?token=' . rawurlencode( $token );
-        $bookmarklet   = $this->build_bookmarklet( $data_endpoint, $img_endpoint );
-        $form_url      = STADWAG_TARGET_BASE . STADWAG_FORM_PATH;
+        $token           = $this->get_token();
+        $userscript_url  = rest_url( 'stadwag/v1/userscript' ) . '?token=' . rawurlencode( $token );
+        $form_url        = STADWAG_TARGET_BASE . STADWAG_FORM_PATH;
         ?>
         <div class="wrap">
             <h1>Stad Wageningen Doorplaatsen</h1>
@@ -71,64 +69,63 @@ class Stadwag_Admin {
                 <li>Open in WordPress het bericht dat je wilt doorplaatsen.</li>
                 <li>Kies in het blok <strong>Stad Wageningen</strong> (rechts) de categorie en vul
                     eventueel onderschrift + fotocredit in.</li>
-                <li>Klik op <strong>Klaarzetten voor Stad Wageningen</strong>.</li>
-                <li>Ga naar <a href="<?php echo esc_url( $form_url ); ?>" target="_blank" rel="noopener"><?php echo esc_html( $form_url ); ?></a>
-                    (zorg dat je daar bent ingelogd).</li>
-                <li>Klik op je bookmarklet <strong>«SW invullen»</strong> — titel, tekst, categorie en
-                    foto worden automatisch ingevuld.</li>
+                <li>Klik op <strong>Doorplaatsen naar Stad Wageningen</strong> — het bericht wordt
+                    klaargezet en de tip-de-redactie-pagina opent automatisch in een nieuw tabblad.</li>
+                <li>Het userscript vult alles automatisch in (titel, tekst, categorie, foto,
+                    onderschrift, fotocredit) en vinkt de voorwaarden aan.</li>
                 <li>Er verschijnt een bevestigingsvenster: <strong>Verzenden naar Stad Wageningen?</strong>
                     Klik op <strong>OK</strong> om direct te verzenden, of op Annuleren om eerst te
                     controleren.</li>
             </ol>
+            <p style="color:#666;">Let op: je moet ingelogd zijn op stadwageningen.nl. Het userscript
+               logt niet voor je in.</p>
 
             <hr>
 
-            <h2>Eenmalig instellen: de bookmarklet</h2>
-            <p>Sleep onderstaande knop naar je bladwijzerbalk (in Vivaldi/Chrome: bladwijzerbalk
-               zichtbaar maken met <code>Ctrl/Cmd&nbsp;+&nbsp;Shift&nbsp;+&nbsp;B</code>, daarna de knop
-               erheen slepen):</p>
+            <h2>Eenmalig instellen: het userscript</h2>
+            <p>Deze plugin gebruikt een <strong>Tampermonkey-userscript</strong> in plaats van een
+               bookmarklet. Het userscript draait automatisch zodra je de tip-de-redactie-pagina
+               opent — je hoeft niet meer op een bookmarklet te klikken.</p>
 
+            <h3>Stap 1: Tampermonkey installeren</h3>
+            <p>Installeer de Tampermonkey-extensie voor je browser:</p>
+            <ul style="list-style:disc;margin-left:20px;">
+                <li><a href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noopener">Chrome / Vivaldi / Edge</a></li>
+                <li><a href="https://addons.mozilla.org/firefox/addon/tampermonkey/" target="_blank" rel="noopener">Firefox</a></li>
+            </ul>
+
+            <h3>Stap 2: Het userscript installeren</h3>
+            <p>Klik op onderstaande link. Tampermonkey opent automatisch en vraagt of je het script
+               wilt installeren. Klik op <strong>Install</strong>.</p>
             <p style="margin:16px 0;">
-                <a href="<?php echo esc_attr( $bookmarklet ); ?>"
-                   onclick="alert('Sleep deze knop naar je bladwijzerbalk — niet aanklikken.'); return false;"
+                <a href="<?php echo esc_url( $userscript_url ); ?>" target="_blank"
                    style="display:inline-block;padding:10px 18px;background:#2c2c2c;color:#fff;
-                          border-radius:6px;text-decoration:none;font-weight:600;cursor:grab;">
-                    &laquo; SW invullen &raquo;
+                          border-radius:6px;text-decoration:none;font-weight:600;">
+                    &darr; Installeer userscript
                 </a>
             </p>
-            <p class="description">Lukt slepen niet? Maak handmatig een bladwijzer aan en plak de
-               onderstaande code als URL/adres:</p>
-            <textarea readonly rows="4" style="width:100%;max-width:760px;font-family:monospace;font-size:11px;"
-                      onclick="this.select();"><?php echo esc_textarea( $bookmarklet ); ?></textarea>
+            <p class="description">Werkt de link niet? Kopieer dan de code hieronder en plak deze
+               handmatig in Tampermonkey (Dashboard → + (nieuw script) → plak → Ctrl/Cmd+S):</p>
+            <textarea readonly rows="6" style="width:100%;max-width:760px;font-family:monospace;font-size:11px;"
+                      onclick="this.select();">Open deze URL in je browser terwijl je in WordPress bent ingelogd:
+<?php echo esc_textarea( $userscript_url ); ?></textarea>
 
             <hr>
 
             <h2>Token</h2>
-            <p class="description">De bookmarklet gebruikt dit geheime token om de berichtdata bij
+            <p class="description">Het userscript gebruikt dit geheime token om de berichtdata bij
                WordPress op te halen. Genereer een nieuw token als je vermoedt dat het is uitgelekt
-               (daarna moet je de bookmarklet opnieuw instellen).</p>
+               (daarna moet je het userscript opnieuw installeren).</p>
             <p><code style="user-select:all;"><?php echo esc_html( $token ); ?></code></p>
             <form method="post">
                 <?php wp_nonce_field( 'stadwag_regen' ); ?>
                 <button type="submit" name="stadwag_regen_token" value="1" class="button button-secondary"
-                        onclick="return confirm('Nieuw token aanmaken? De huidige bookmarklet werkt daarna niet meer.');">
+                        onclick="return confirm('Nieuw token aanmaken? Het huidige userscript werkt daarna niet meer.');">
                     Nieuw token genereren
                 </button>
             </form>
         </div>
         <?php
-    }
-
-    /**
-     * Bouwt de bookmarklet-code (een javascript:-URL).
-     * NOWDOC zodat PHP de JS niet interpreteert; alleen het endpoint wordt vervangen.
-     */
-    private function build_bookmarklet( string $data_endpoint, string $img_endpoint ): string {
-        $js = <<<'JS'
-javascript:(function(){var D='__ENDPOINT__',IMG='__IMG__';fetch(D).then(function(r){return r.json();}).then(function(d){if(!d||!d.title){alert('Stad Wageningen: '+((d&&(d.error||d.message))||'geen gegevens gevonden'));return;}function fire(e,t){e.dispatchEvent(new Event(t,{bubbles:true}));}function setVal(el,v){if(!el)return;var p=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var s=Object.getOwnPropertyDescriptor(p,'value').set;s.call(el,v==null?'':v);fire(el,'input');fire(el,'change');}function typeCE(ce,v){if(!ce)return;ce.focus();try{document.execCommand('selectAll',false,null);document.execCommand('insertText',false,v);}catch(err){ce.textContent=v;fire(ce,'input');}}var cat=document.getElementById('CategoryId');if(cat){cat.value=d.category_id;fire(cat,'change');}var ces=[].slice.call(document.querySelectorAll('[contenteditable="true"],[contenteditable=""]'));typeCE(ces[0],d.title);typeCE(ces[1],d.text);setVal(document.getElementById('title'),d.title);setVal(document.getElementById('text'),d.text);function fillCC(){setVal(document.querySelector("[name='caption[0]']"),d.caption);setVal(document.querySelector("[name='credit[0]']"),d.credit);}function doSubmit(){var cb=document.getElementById('okGeneralConditions');if(cb){cb.checked=true;fire(cb,'change');}var msg='✓ Alles ingevuld';if(d.image_name){msg+=' (inclusief foto)';}msg+='\n\nVerzenden naar Stad Wageningen?';if(confirm(msg)){if(typeof pubbleWebsiteForms!=='undefined'){pubbleWebsiteForms.submit();}else{var s=document.getElementById('send');if(s){s.click();}}}else{alert('Verzenden geannuleerd. Controleer het formulier en klik handmatig op Verzenden.');}}if(d.image_name){fetch(IMG).then(function(r){return r.ok?r.blob():null;}).then(function(b){if(b){try{var f=new File([b],d.image_name,{type:b.type||'image/jpeg'});var inp=document.querySelector('input[type=file]');if(inp){var dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;fire(inp,'change');}setTimeout(fillCC,800);setTimeout(doSubmit,2000);}catch(e){fillCC();alert('✓ Tekst ingevuld. Upload de foto zelf: '+d.image_name+'\nVink de voorwaarden aan en klik op Verzenden.');}}else{fillCC();alert('✓ Tekst ingevuld. Upload de foto zelf: '+d.image_name+'\nVink de voorwaarden aan en klik op Verzenden.');}}).catch(function(){fillCC();alert('✓ Tekst ingevuld. Upload de foto zelf: '+d.image_name+'\nVink de voorwaarden aan en klik op Verzenden.');});}else{fillCC();setTimeout(doSubmit,500);}}).catch(function(e){alert('Kon de gegevens niet ophalen uit WordPress.\n'+e);});})();
-JS;
-
-        return str_replace( [ '__ENDPOINT__', '__IMG__' ], [ $data_endpoint, $img_endpoint ], $js );
     }
 
     // -------------------------------------------------------------------------
@@ -189,10 +186,10 @@ JS;
             . 'style="width:100%;margin-top:4px;" value="' . esc_attr( $saved_credit ) . '" placeholder="Bijv. naam fotograaf">';
         echo '</p>';
 
-        // Klaarzet-knop
+        // Doorplaats-knop
         echo '<p>';
         echo '<button type="button" id="stadwag-queue-btn" class="button button-primary" style="width:100%;">';
-        echo 'Klaarzetten voor Stad Wageningen';
+        echo 'Doorplaatsen naar Stad Wageningen';
         echo '</button>';
         echo '<span id="stadwag-spinner" class="spinner" style="float:none;margin:4px 0 0 5px;visibility:hidden;"></span>';
         echo '</p>';
@@ -219,6 +216,7 @@ JS;
         wp_localize_script( 'stadwag-metabox', 'stadwagAjax', [
             'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
             'settingsUrl' => admin_url( 'options-general.php?page=stadwag-settings' ),
+            'formUrl'     => STADWAG_TARGET_BASE . STADWAG_FORM_PATH,
         ] );
     }
 
@@ -256,7 +254,8 @@ JS;
         ] );
 
         wp_send_json_success( [
-            'message' => 'Klaargezet! Ga naar de Stad Wageningen-pagina en klik op je bookmarklet «SW invullen».',
+            'message' => 'Klaargezet! De tip-de-redactie-pagina wordt geopend...',
+            'form_url' => STADWAG_TARGET_BASE . STADWAG_FORM_PATH,
         ] );
     }
 }

@@ -35,6 +35,10 @@
                 if ( response.success ) {
                     setFeedback( 'success', response.data.message );
                     $( '#stadwag-queued-badge' ).show();
+                    // Open de tip-de-redactie-pagina in een nieuw tabblad.
+                    // Het userscript draait daar automatisch en vult alles in.
+                    var url = ( response.data.form_url ) ? response.data.form_url : stadwagAjax.formUrl;
+                    window.open( url, '_blank' );
                 } else {
                     var msg = ( response.data && response.data.message ) ? response.data.message : 'Onbekende fout.';
                     setFeedback( 'error', msg );
